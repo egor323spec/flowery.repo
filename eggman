@@ -1,0 +1,340 @@
+
+-- EGGМAN RP | Outcome Memories inspired
+-- Local visual effects
+-- E = Shield | Q = Jetpack
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local RED = Color3.fromRGB(220, 25, 35)
+local BLUE = Color3.fromRGB(0, 170, 255)
+local WHITE = Color3.fromRGB(240, 250, 255)
+local DARK = Color3.fromRGB(25, 10, 12)
+
+-- CONFIG
+local SHIELD_RADIUS = 40
+local LMS_ID = "rbxassetid://87493231115640"
+local VOICE_ID = "rbxassetid://0" -- Replace with valid audio ID
+
+-- CLEANUP OLD GUI
+local old = playerGui:FindFirstChild("EggmanRP")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanRP"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(280, 420)
+frame.Position = UDim2.new(0, 25, 0.3, 0)
+frame.BackgroundColor3 = DARK
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = RED
+stroke.Thickness = 2
+stroke.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -20, 0, 45)
+title.Position = UDim2.fromOffset(10, 5)
+title.BackgroundTransparency = 1
+title.Text = "EGGMAN // RP"
+title.TextColor3 = RED
+title.TextScaled = true
+title.Font = Enum.Font.GothamBlack
+title.Parent = frame
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 25)
+status.Position = UDim2.fromOffset(10, 48)
+status.BackgroundTransparency = 1
+status.Text = "OUTCOME MEMORIES"
+status.TextColor3 = WHITE
+status.TextScaled = true
+status.Font = Enum.Font.GothamBold
+status.Parent = frame
+
+local function notify(message)
+    status.Text = message
+    task.delay(2, function()
+        if status.Parent then
+            status.Text = "OUTCOME MEMORIES"
+        end
+    end)
+end
+
+local function getCharacter()
+    return player.Character
+end
+
+local function getRoot()
+    local char = getCharacter()
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function makeButton(text, y, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -24, 0, 42)
+    button.Position = UDim2.fromOffset(12, y)
+    button.BackgroundColor3 = Color3.fromRGB(65, 15, 20)
+    button.TextColor3 = WHITE
+    button.Text = text
+    button.TextScaled = true
+    button.Font = Enum.Font.GothamBold
+    button.Parent = frame
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 8)
+    c.Parent = button
+
+    button.Activated:Connect(callback)
+    return button
+end
+
+-- SHIELD
+local shieldEnabled = false
+local shieldVisual = nil
+
+local function createShield()
+    local root = getRoot()
+    if not root then
+        notify("CHARACTER NOT FOUND")
+        return
+    end
+
+    if shieldVisual then
+        shieldVisual:Destroy()
+    end
+
+    local sphere = Instance.new("Part")
+    sphere.Name = "EggmanShieldVisual"
+    sphere.Shape = Enum.PartType.Ball
+    sphere.Size = Vector3.new(
+        SHIELD_RADIUS * 2,
+        SHIELD_RADIUS * 2,
+        SHIELD_RADIUS * 2
+    )
+    sphere.Material = Enum.Material.Glass
+    sphere.Color = BLUE
+    sphere.Transparency = 0.55
+    sphere.Reflectance = 0.15
+    sphere.CanCollide = false
+    sphere.CanTouch = false
+    sphere.CanQuery = false
+    sphere.Massless = true
+    sphere.Anchored = false
+    sphere.CFrame = root.CFrame
+    sphere.Parent = workspace
+
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = root
+    weld.Part1 = sphere
+    weld.Parent = sphere
+
+    -- Outline
+    local outline = Instance.new("Highlight")
+    outline.Name = "EggmanShieldOutline"
+    outline.Adornee = sphere
+    outline.FillTransparency = 1
+    outline.OutlineColor = Color3.fromRGB(80, 210, 255)
+    outline.OutlineTransparency = 0
+    outline.Parent = sphere
+
+    shieldVisual = sphere
+    shieldEnabled = true
+    notify("ENERGY SHIELD: ON")
+end
+
+local function toggleShield()
+    if shieldEnabled then
+        shieldEnabled = false
+
+        if shieldVisual then
+            shieldVisual:Destroy()
+            shieldVisual = nil
+        end
+
+        notify("ENERGY SHIELD: OFF")
+    else
+        createShield()
+    end
+end
+
+-- JETPACK
+local jetpackEnabled = false
+local jetpackAttachment = nil
+
+local function toggleJetpack()
+    local root = getRoot()
+    if not root then
+        notify("CHARACTER NOT FOUND")
+        return
+    end
+
+    jetpackEnabled = not jetpackEnabled
+
+    if jetpackEnabled then
+        local attachment = Instance.new("Attachment")
+        attachment.Name = "EggmanJetpackFX"
+        attachment.Position = Vector3.new(0, -1.5, 0)
+        attachment.Parent = root
+
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = "rbxasset://textures/particles/fire_main.dds"
+        emitter.Color = ColorSequence.new(
+            Color3.fromRGB(255, 60, 20),
+            Color3.fromRGB(255, 200, 40)
+        )
+        emitter.Rate = 90
+        emitter.Lifetime = NumberRange.new(0.2, 0.5)
+        emitter.Speed = NumberRange.new(4, 8)
+        emitter.SpreadAngle = Vector2.new(25, 25)
+        emitter.Parent = attachment
+
+        jetpackAttachment = attachment
+        notify("JETPACK: ON")
+    else
+        if jetpackAttachment then
+            jetpackAttachment:Destroy()
+            jetpackAttachment = nil
+        end
+
+        notify("JETPACK: OFF")
+    end
+end
+
+-- SHIELD HIT: visual wave only
+local function shieldHit()
+    if not shieldEnabled or not shieldVisual then
+        notify("ACTIVATE SHIELD FIRST!")
+        return
+    end
+
+    local root = getRoot()
+    if not root then return end
+
+    local wave = Instance.new("Part")
+    wave.Name = "EggmanShieldShockwave"
+    wave.Shape = Enum.PartType.Ball
+    wave.Material = Enum.Material.Neon
+    wave.Color = BLUE
+    wave.Transparency = 0.25
+    wave.Size = Vector3.new(2, 2, 2)
+    wave.Anchored = true
+    wave.CanCollide = false
+    wave.CanTouch = false
+    wave.CanQuery = false
+    wave.CFrame = root.CFrame
+    wave.Parent = workspace
+
+    local tween = TweenService:Create(
+        wave,
+        TweenInfo.new(
+            0.45,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        ),
+        {
+            Size = Vector3.new(100, 100, 100),
+            Transparency = 1
+        }
+    )
+
+    tween:Play()
+    tween.Completed:Connect(function()
+        wave:Destroy()
+    end)
+
+    notify("SHIELD HIT!")
+end
+
+-- LMS SONG
+local lmsSound = nil
+
+local function toggleLMS()
+    local root = getRoot()
+    if not root then
+        notify("CHARACTER NOT FOUND")
+        return
+    end
+
+    if lmsSound then
+        lmsSound:Stop()
+        lmsSound:Destroy()
+        lmsSound = nil
+        notify("LMS SONG: OFF")
+        return
+    end
+
+    local sound = Instance.new("Sound")
+    sound.Name = "EggmanLMS"
+    sound.SoundId = LMS_ID
+    sound.Volume = 0.7
+    sound.Looped = true
+    sound.Parent = root
+    sound:Play()
+
+    lmsSound = sound
+    notify("LMS SONG: ON")
+end
+
+-- VOICE LINE
+local function eggmanVoice()
+    local root = getRoot()
+    if not root then return end
+
+    local sound = Instance.new("Sound")
+    sound.Name = "EggmanVoice"
+    sound.SoundId = VOICE_ID
+    sound.Volume = 1
+    sound.Parent = root
+    sound:Play()
+
+    sound.Ended:Connect(function()
+        sound:Destroy()
+    end)
+
+    notify("EGGMAN VOICE")
+end
+
+-- BUTTONS
+makeButton("ENERGY SHIELD [E]", 82, toggleShield)
+makeButton("JETPACK BOOST [Q]", 132, toggleJetpack)
+makeButton("SHIELD HIT", 182, shieldHit)
+makeButton("LMS SONG", 232, toggleLMS)
+makeButton("EGGMAN VOICE", 282, eggmanVoice)
+
+makeButton("CLOSE MENU", 332, function()
+    shieldEnabled = false
+    jetpackEnabled = false
+
+    if shieldVisual then shieldVisual:Destroy() end
+    if jetpackAttachment then jetpackAttachment:Destroy() end
+    if lmsSound then lmsSound:Destroy() end
+
+    gui:Destroy()
+end)
+
+-- KEYBINDS
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.E then
+        toggleShield()
+    elseif input.KeyCode == Enum.KeyCode.Q then
+        toggleJetpack()
+    end
+end)
+
+print("Eggman RP loaded")
