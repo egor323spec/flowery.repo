@@ -1,0 +1,336 @@
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+
+local DASH_SPEED = 70
+local DASH_DURATION = 3
+local SHIELD_DURATION = 5
+
+local IDS = {
+    Shield = "121620484878674",
+    Dash = "126742809369490",
+    CrackedEmpire = "87493231115640",
+    Explosion = "107417919520477",
+    MasterPlan = "109603358638247"
+}
+
+local function characterParts()
+    local character = player.Character or player.CharacterAdded:Wait()
+    return character,
+        character:FindFirstChildOfClass("Humanoid"),
+        character:FindFirstChild("HumanoidRootPart")
+end
+
+local function playSound(id, looped)
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = 1
+    sound.Looped = looped or false
+    sound.Parent = SoundService
+    sound:Play()
+
+    if not sound.Looped then
+        sound.Ended:Connect(function()
+            sound:Destroy()
+        end)
+    end
+
+    return sound
+end
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanV4"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(280, 330)
+frame.Position = UDim2.new(0.04, 0, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 10, 35)
+frame.Active = true
+frame.Parent = gui
+
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(190, 60, 255)
+stroke.Thickness = 2
+stroke.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 38)
+title.BackgroundTransparency = 1
+title.Text = "EGGMAN V4"
+title.TextColor3 = Color3.fromRGB(255, 90, 40)
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 22
+title.Parent = frame
+
+local function makeButton(text, y, color, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -24, 0, 36)
+    b.Position = UDim2.fromOffset(12, y)
+    b.BackgroundColor3 = color
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 12
+    b.Text = text
+    b.Parent = frame
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    b.Activated:Connect(callback)
+    return b
+end
+
+-- Перетаскивание меню
+local dragging = false
+local dragStart, startPos
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+-- Энергетический щит
+local shieldActive = false
+
+local function activateShield()
+    if shieldActive then return end
+
+    local _, humanoid, root = characterParts()
+    if not humanoid or not root or humanoid.Health <= 0 then return end
+
+    shieldActive = true
+
+    local shield = Instance.new("Part")
+    shield.Name = "EggmanEnergyShield"
+    shield.Shape = Enum.PartType.Ball
+    shield.Size = Vector3.new(10, 10, 10)
+    shield.Material = Enum.Material.ForceField
+    shield.Color = Color3.fromRGB(0, 200, 255)
+    shield.Transparency = 0.35
+    shield.CanCollide = false
+    shield.Massless = true
+    shield.CFrame = root.CFrame
+    shield.Parent = workspace
+
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = root
+    weld.Part1 = shield
+    weld.Parent = shield
+
+    playSound(IDS.Shield)
+
+    task.delay(SHIELD_DURATION, function()
+        if shield.Parent then shield:Destroy() end
+        shieldActive = false
+    end)
+end
+
+-- Дэш + белые звёздочки + дым из ног
+local dashActive = false
+
+local function activateDash()
+    if dashActive then return end
+
+    local character, humanoid, root = characterParts()
+    if not humanoid or not root or humanoid.Health <= 0 then return end
+
+    dashActive = true
+
+    local attachments = {}
+
+    local function addEffect(part, texture, rate, lifetime, size)
+        local a = Instance.new("Attachment")
+        a.Parent = part
+        table.insert(attachments, a)
+
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = texture
+        emitter.Color = ColorSequence.new(Color3.new(1, 1, 1))
+        emitter.LightEmission = 0.8
+        emitter.Rate = rate
+        emitter.Lifetime = NumberRange.new(lifetime * 0.7, lifetime)
+        emitter.Speed = NumberRange.new(2, 7)
+        emitter.SpreadAngle = Vector2.new(180, 180)
+        emitter.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, size),
+            NumberSequenceKeypoint.new(1, 0)
+        })
+        emitter.Parent = a
+    end
+
+    addEffect(
+        root,
+        "rbxasset://textures/particles/sparkles_main.dds",
+        100, 0.5, 0.3
+    )
+
+    for _, name in ipairs({"LeftFoot", "RightFoot", "Left Leg", "Right Leg"}) do
+        local leg = character:FindFirstChild(name)
+        if leg and leg:IsA("BasePart") then
+            addEffect(
+                leg,
+                "rbxasset://textures/particles/smoke_main.dds",
+                60, 0.7, 1.2
+            )
+        end
+    end
+
+    playSound(IDS.Dash)
+
+    local started = os.clock()
+
+    while os.clock() - started < DASH_DURATION do
+        if not root.Parent or humanoid.Health <= 0 then break end
+
+        local camera = workspace.CurrentCamera
+        if camera then
+            local move = humanoid.MoveDirection
+            local direction
+
+            if move.Magnitude > 0.05 then
+                -- Проекция WASD на горизонтальное направление камеры
+                local forward = Vector3.new(
+                    camera.CFrame.LookVector.X, 0,
+                    camera.CFrame.LookVector.Z
+                )
+                local right = Vector3.new(
+                    camera.CFrame.RightVector.X, 0,
+                    camera.CFrame.RightVector.Z
+                )
+
+                if forward.Magnitude > 0 then forward = forward.Unit end
+                if right.Magnitude > 0 then right = right.Unit end
+
+                local facing = Vector3.new(
+                    root.CFrame.LookVector.X, 0,
+                    root.CFrame.LookVector.Z
+                )
+                local side = Vector3.new(
+                    root.CFrame.RightVector.X, 0,
+                    root.CFrame.RightVector.Z
+                )
+
+                direction = Vector3.zero
+                if facing.Magnitude > 0 then
+                    direction += forward * move:Dot(facing.Unit)
+                end
+                if side.Magnitude > 0 then
+                    direction += right * move:Dot(side.Unit)
+                end
+            else
+                direction = Vector3.new(
+                    camera.CFrame.LookVector.X, 0,
+                    camera.CFrame.LookVector.Z
+                )
+            end
+
+            if direction.Magnitude > 0.01 then
+                direction = direction.Unit
+                root.AssemblyLinearVelocity = Vector3.new(
+                    direction.X * DASH_SPEED,
+                    root.AssemblyLinearVelocity.Y,
+                    direction.Z * DASH_SPEED
+                )
+            end
+        end
+
+        RunService.Heartbeat:Wait()
+    end
+
+    for _, a in ipairs(attachments) do
+        if a.Parent then a:Destroy() end
+    end
+
+    dashActive = false
+end
+
+-- Музыка
+local music
+local musicButton
+
+local function toggleMusic()
+    if music then
+        music:Stop()
+        music:Destroy()
+        music = nil
+        musicButton.Text = "CRACKED EMPIRE: OFF"
+    else
+        music = playSound(IDS.CrackedEmpire, true)
+        musicButton.Text = "CRACKED EMPIRE: ON"
+    end
+end
+
+makeButton("ENERGY SHIELD [E]", 45, Color3.fromRGB(0, 115, 180), activateShield)
+makeButton("DASH BOOST [Q]", 86, Color3.fromRGB(180, 80, 20), activateDash)
+
+makeButton("SHIELD HIT", 127, Color3.fromRGB(0, 140, 160), function()
+    local _, _, root = characterParts()
+    if not root then return end
+
+    local wave = Instance.new("Part")
+    wave.Shape = Enum.PartType.Ball
+    wave.Size = Vector3.one
+    wave.Material = Enum.Material.Neon
+    wave.Color = Color3.fromRGB(0, 220, 255)
+    wave.Transparency = 0.25
+    wave.Anchored = true
+    wave.CanCollide = false
+    wave.CFrame = root.CFrame
+    wave.Parent = workspace
+
+    TweenService:Create(wave, TweenInfo.new(0.45), {
+        Size = Vector3.new(20, 20, 20),
+        Transparency = 1
+    }):Play()
+
+    playSound(IDS.Explosion)
+    task.delay(0.5, function()
+        if wave.Parent then wave:Destroy() end
+    end)
+end)
+
+musicButton = makeButton("CRACKED EMPIRE: OFF", 168, Color3.fromRGB(130, 20, 100), toggleMusic)
+
+makeButton("MASTER PLAN", 209, Color3.fromRGB(130, 60, 20), function()
+    playSound(IDS.MasterPlan)
+end)
+
+makeButton("CLOSE MENU", 250, Color3.fromRGB(100, 25, 35), function()
+    if music then music:Stop(); music:Destroy() end
+    gui:Destroy()
+end)
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.E then
+        activateShield()
+    elseif input.KeyCode == Enum.KeyCode.Q then
+        activateDash()
+    end
+end)
