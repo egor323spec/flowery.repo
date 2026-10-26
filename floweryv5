@@ -1,7 +1,5 @@
-
 -- FLOWERY V5 - Roblox Studio
 -- StarterPlayer > StarterPlayerScripts > LocalScript
-
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -449,3 +447,4 @@ RunService.RenderStepped:Connect(function(dt)
         )
     end
 end)
+
