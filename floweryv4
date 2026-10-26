@@ -1,0 +1,220 @@
+
+-- FLOWERY: RUN / JARONA / OMEGA / LAST JARONA
+-- LocalScript: StarterPlayer > StarterPlayerScripts
+-- Флинг других персонажей должен проверяться сервером
+-- в собственной игре Roblox Studio.
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+local RUN_KEY = Enum.KeyCode.Q
+local JARONA_KEY = Enum.KeyCode.E
+local OMEGA_KEY = Enum.KeyCode.G
+local LAST_JARONA_KEY = Enum.KeyCode.F
+
+local NORMAL_SPEED = 16
+local RUN_SPEED = 500
+local OMEGA_RUN_SPEED = 1000
+local JARONA_SPEED = 90
+local LAST_JARONA_SPEED = 10000
+
+local MAX_CHARGE = 3
+local MIN_DASH_TIME = 0.5
+local MAX_DASH_TIME = 3.5
+
+local SOUND = {
+    Spawn = "87619134157949",
+    Run = "108424972802128",
+    Jarona = "129824937730574",
+    LastJarona = "124203418885702",
+    Omega = "87872050816795",
+    Charge = "83448418187528",
+}
+
+local character, humanoid, root
+local running = false
+local omega = false
+local charging = false
+local chargeStart = 0
+local dashUntil = 0
+local dashSpeed = 0
+local dashDirection = Vector3.zero
+local savedAutoRotate = true
+
+local function playSound(id, looped)
+    if not root then return nil end
+
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = 1
+    sound.Looped = looped or false
+    sound.Parent = root
+    sound:Play()
+
+    if not sound.Looped then
+        sound.Ended:Connect(function()
+            sound:Destroy()
+        end)
+    end
+
+    return sound
+end
+
+local function updateSpeed()
+    if not humanoid then return end
+
+    if running then
+        humanoid.WalkSpeed = omega and OMEGA_RUN_SPEED or RUN_SPEED
+    else
+        humanoid.WalkSpeed = NORMAL_SPEED
+    end
+end
+
+local function stopCharge()
+    charging = false
+
+    if humanoid then
+        humanoid.WalkSpeed = NORMAL_SPEED
+        humanoid.JumpPower = 50
+        humanoid.AutoRotate = savedAutoRotate
+    end
+end
+
+local function beginDash(speed, duration, soundId)
+    if not root or not humanoid then return end
+
+    local direction = humanoid.MoveDirection
+    if direction.Magnitude < 0.05 then
+        direction = root.CFrame.LookVector
+    end
+
+    dashDirection = direction.Unit
+    dashSpeed = speed
+    dashUntil = os.clock() + duration
+
+    playSound(soundId)
+end
+
+local function toggleOmega()
+    omega = not omega
+
+    if omega then
+        playSound(SOUND.Omega)
+
+        -- Короткое зависание; это клиентский визуально-физический эффект.
+        local start = os.clock()
+        while os.clock() - start < 2 do
+            if not root or not root.Parent then break end
+            root.AssemblyLinearVelocity = Vector3.new(
+                root.AssemblyLinearVelocity.X,
+                0,
+                root.AssemblyLinearVelocity.Z
+            )
+            RunService.Heartbeat:Wait()
+        end
+    end
+
+    updateSpeed()
+end
+
+local function startCharge()
+    if not omega or charging then return end
+    if not humanoid or not root then return end
+
+    charging = true
+    chargeStart = os.clock()
+    savedAutoRotate = humanoid.AutoRotate
+
+    humanoid.WalkSpeed = 0
+    humanoid.JumpPower = 0
+    humanoid.AutoRotate = false
+
+    playSound(SOUND.Charge)
+end
+
+local function releaseCharge()
+    if not charging then return end
+
+    local elapsed = math.clamp(os.clock() - chargeStart, 0, MAX_CHARGE)
+    stopCharge()
+
+    local dashTime = MIN_DASH_TIME
+        + (MAX_DASH_TIME - MIN_DASH_TIME) * (elapsed / MAX_CHARGE)
+
+    -- Полная Last Jarona: скорость 10000 на максимальном заряде.
+    local speed = 90 + (LAST_JARONA_SPEED - 90) * (elapsed / MAX_CHARGE)
+
+    beginDash(speed, dashTime, SOUND.LastJarona)
+    updateSpeed()
+end
+
+local function onCharacterAdded(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    root = char:WaitForChild("HumanoidRootPart")
+
+    running = false
+    omega = false
+    charging = false
+    dashUntil = 0
+
+    updateSpeed()
+    playSound(SOUND.Spawn)
+end
+
+if player.Character then
+    task.spawn(onCharacterAdded, player.Character)
+end
+
+player.CharacterAdded:Connect(onCharacterAdded)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == RUN_KEY then
+        running = true
+        updateSpeed()
+        playSound(SOUND.Run)
+
+    elseif input.KeyCode == JARONA_KEY then
+        beginDash(JARONA_SPEED, 1.5, SOUND.Jarona)
+
+    elseif input.KeyCode == OMEGA_KEY then
+        task.spawn(toggleOmega)
+
+    elseif input.KeyCode == LAST_JARONA_KEY then
+        startCharge()
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == RUN_KEY then
+        running = false
+        updateSpeed()
+
+    elseif input.KeyCode == LAST_JARONA_KEY then
+        releaseCharge()
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not root or not humanoid then return end
+
+    if charging then
+        -- Обновляем таймер заряда и автоматически завершаем на 3 сек.
+        if os.clock() - chargeStart >= MAX_CHARGE then
+            releaseCharge()
+        end
+    end
+
+    if os.clock() < dashUntil then
+        root.AssemblyLinearVelocity = Vector3.new(
+            dashDirection.X * dashSpeed,
+            root.AssemblyLinearVelocity.Y,
+            dashDirection.Z * dashSpeed
+        )
+    end
+end)
