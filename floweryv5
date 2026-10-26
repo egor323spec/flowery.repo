@@ -1,0 +1,451 @@
+
+-- FLOWERY V5 - Roblox Studio
+-- StarterPlayer > StarterPlayerScripts > LocalScript
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+--================ SETTINGS ================
+local Config = {
+    RunKey = Enum.KeyCode.Q,
+    JaronaKey = Enum.KeyCode.E,
+    OmegaKey = Enum.KeyCode.G,
+    LastKey = Enum.KeyCode.F,
+
+    NormalSpeed = 16,
+    RunSpeed = 500,
+    OmegaRunSpeed = 1000,
+
+    JaronaSpeed = 45,
+    JaronaDuration = 0.4,
+
+    LastSpeed = 45,
+    MaxCharge = 3,
+    MinLastDuration = 0.5,
+    MaxLastDuration = 3.5,
+
+    CloneCount = 10,
+    CloneSpacing = 3,
+    HoverMaxTime = 10,
+}
+
+local Sounds = {
+    Spawn = "87619134157949",
+    Run = "108424972802128",
+    Jarona = "129824937730574",
+    LastJarona = "124203418885702",
+    Omega = "87872050816795",
+    Charge = "83448418187528",
+}
+
+local RunAnimationId = "79797127992511"
+
+--================ STATE ===================
+local character, humanoid, root, animator
+local running = false
+local omega = false
+local charging = false
+local chargeStarted = 0
+local dashStarted = 0
+local dashDuration = 0
+local dashing = false
+local oldAutoRotate = true
+local oldJumpPower = 50
+local chargeSound
+local runSound
+local hoverPosition
+local clones = {}
+local rainbowClock = 0
+local runTrack
+
+--================ MENU ====================
+local gui = Instance.new("ScreenGui")
+gui.Name = "FloweryV5"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.fromOffset(290, 300)
+panel.Position = UDim2.new(0, 20, 0.3, 0)
+panel.BackgroundColor3 = Color3.fromRGB(25, 15, 40)
+panel.Parent = gui
+
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+
+local function label(text, y, size)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -16, 0, size or 28)
+    l.Position = UDim2.fromOffset(8, y)
+    l.BackgroundTransparency = 1
+    l.TextColor3 = Color3.new(1, 1, 1)
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Font = Enum.Font.GothamBold
+    l.TextSize = 14
+    l.Text = text
+    l.Parent = panel
+    return l
+end
+
+label("FLOWERY V5  |  CONTROL", 8, 30)
+local status = label("Omega: OFF | Run: OFF", 42)
+local chargeText = label("Charge: 0.000 / 3.000", 72)
+local dashText = label("Dash: 0.000", 102)
+local abilityText = label("Jarona: 0.4 sec | Speed: 45", 132)
+
+local barBack = Instance.new("Frame")
+barBack.Size = UDim2.new(1, -16, 0, 12)
+barBack.Position = UDim2.fromOffset(8, 164)
+barBack.BackgroundColor3 = Color3.fromRGB(65, 45, 80)
+barBack.Parent = panel
+
+local bar = Instance.new("Frame")
+bar.Size = UDim2.fromScale(0, 1)
+bar.BackgroundColor3 = Color3.fromRGB(255, 50, 220)
+bar.BorderSizePixel = 0
+bar.Parent = barBack
+
+local function button(text, x, y, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0.45, 0, 0, 34)
+    b.Position = UDim2.new(x, 0, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(90, 35, 110)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 14
+    b.Text = text
+    b.Parent = panel
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+    b.Activated:Connect(callback)
+    return b
+end
+
+--================ SOUND ===================
+local function playSound(id, looped)
+    if not root then return nil end
+    local s = Instance.new("Sound")
+    s.SoundId = "rbxassetid://" .. id
+    s.Volume = 1
+    s.Looped = looped or false
+    s.Parent = root
+    s:Play()
+    if not s.Looped then
+        s.Ended:Connect(function()
+            s:Destroy()
+        end)
+    end
+    return s
+end
+
+--================ RAINBOW OMEGA ===========
+local function setOmega(enabled)
+    if not character then return end
+
+    local old = character:FindFirstChild("FloweryOmega")
+    if old then old:Destroy() end
+
+    if enabled then
+        local h = Instance.new("Highlight")
+        h.Name = "FloweryOmega"
+        h.FillTransparency = 0.3
+        h.OutlineTransparency = 0
+        h.Parent = character
+    end
+end
+
+--================ CLONES ==================
+local function clearClones()
+    for _, clone in ipairs(clones) do
+        if clone then clone:Destroy() end
+    end
+    table.clear(clones)
+end
+
+local function createClone()
+    if not character then return nil end
+
+    character.Archivable = true
+    local clone = character:Clone()
+    clone.Name = "FloweryClone"
+
+    for _, obj in ipairs(clone:GetDescendants()) do
+        if obj:IsA("Script") or obj:IsA("LocalScript")
+            or obj:IsA("Humanoid") or obj:IsA("Animator") then
+            obj:Destroy()
+        elseif obj:IsA("BasePart") then
+            obj.Anchored = true
+            obj.CanCollide = false
+            obj.CanTouch = false
+            obj.CanQuery = false
+            obj.Material = Enum.Material.Neon
+            obj.Transparency = 0.35
+        end
+    end
+
+    clone.Parent = workspace
+    return clone
+end
+
+local function startClones()
+    clearClones()
+    for i = 1, Config.CloneCount do
+        clones[i] = createClone()
+    end
+end
+
+--================ SPEED ====================
+local function updateSpeed()
+    if not humanoid then return end
+
+    if charging then
+        humanoid.WalkSpeed = 0
+    elseif running then
+        humanoid.WalkSpeed = omega
+            and Config.OmegaRunSpeed or Config.RunSpeed
+    else
+        humanoid.WalkSpeed = Config.NormalSpeed
+    end
+
+    status.Text = "Omega: " .. (omega and "ON" or "OFF")
+        .. " | Run: " .. (running and "ON" or "OFF")
+end
+
+--================ DASH =====================
+local function startDash(duration, soundId)
+    if not root or not humanoid or charging then return end
+    dashStarted = os.clock()
+    dashDuration = duration
+    dashing = true
+    playSound(soundId)
+end
+
+local function useJarona()
+    startDash(Config.JaronaDuration, Sounds.Jarona)
+end
+
+local function releaseLast()
+    if not charging then return end
+
+    local elapsed = math.clamp(os.clock() - chargeStarted, 0, Config.MaxCharge)
+    charging = false
+
+    if chargeSound then
+        chargeSound:Stop()
+        chargeSound:Destroy()
+        chargeSound = nil
+    end
+
+    if humanoid then
+        humanoid.AutoRotate = oldAutoRotate
+        humanoid.JumpPower = oldJumpPower
+    end
+
+    updateSpeed()
+
+    local alpha = elapsed / Config.MaxCharge
+    local duration = Config.MinLastDuration
+        + (Config.MaxLastDuration - Config.MinLastDuration) * alpha
+
+    startDash(duration, Sounds.LastJarona)
+end
+
+local function beginCharge()
+    if charging or not omega or not humanoid then return end
+
+    charging = true
+    chargeStarted = os.clock()
+    oldAutoRotate = humanoid.AutoRotate
+    oldJumpPower = humanoid.JumpPower
+
+    humanoid.AutoRotate = false
+    humanoid.JumpPower = 0
+    updateSpeed()
+    chargeSound = playSound(Sounds.Charge, true)
+end
+
+--================ OMEGA HOVER ==============
+local function toggleOmega()
+    omega = not omega
+    setOmega(omega)
+    updateSpeed()
+
+    if not omega then
+        hoverPosition = nil
+        return
+    end
+
+    local sound = playSound(Sounds.Omega)
+    if not sound or not root then return end
+
+    hoverPosition = root.Position
+    local started = os.clock()
+
+    task.spawn(function()
+        while omega and root and root.Parent
+            and sound.Parent and sound.IsPlaying
+            and os.clock() - started < Config.HoverMaxTime do
+            RunService.Heartbeat:Wait()
+        end
+        hoverPosition = nil
+    end)
+end
+
+--================ RUN / ANIMATION ==========
+local function startRun()
+    if running or not humanoid then return end
+    running = true
+    updateSpeed()
+    startClones()
+
+    if runTrack then runTrack:Play() end
+    runSound = playSound(Sounds.Run, true)
+end
+
+local function stopRun()
+    running = false
+    updateSpeed()
+    clearClones()
+
+    if runTrack then runTrack:Stop() end
+    if runSound then
+        runSound:Stop()
+        runSound:Destroy()
+        runSound = nil
+    end
+end
+
+--================ BUTTONS ==================
+button("Q  RUN", 0.04, 0.65, function()
+    if running then stopRun() else startRun() end
+end)
+
+button("E  JARONA", 0.51, 0.65, useJarona)
+button("G  OMEGA", 0.04, 0.78, toggleOmega)
+button("F  CHARGE", 0.51, 0.78, beginCharge)
+
+--================ KEYBOARD =================
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Config.RunKey then
+        startRun()
+    elseif input.KeyCode == Config.JaronaKey then
+        useJarona()
+    elseif input.KeyCode == Config.OmegaKey then
+        toggleOmega()
+    elseif input.KeyCode == Config.LastKey then
+        beginCharge()
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Config.RunKey then
+        stopRun()
+    elseif input.KeyCode == Config.LastKey then
+        releaseLast()
+    end
+end)
+
+--================ CHARACTER =================
+local function onCharacter(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    root = char:WaitForChild("HumanoidRootPart")
+    animator = humanoid:WaitForChild("Animator")
+
+    running = false
+    charging = false
+    omega = false
+    dashing = false
+    hoverPosition = nil
+    clearClones()
+
+    local animate = char:FindFirstChild("Animate")
+    if animate then animate.Disabled = false end
+
+    local animation = Instance.new("Animation")
+    animation.AnimationId = "rbxassetid://" .. RunAnimationId
+    runTrack = animator:LoadAnimation(animation)
+    runTrack.Looped = true
+    runTrack.Priority = Enum.AnimationPriority.Action
+
+    updateSpeed()
+    playSound(Sounds.Spawn)
+end
+
+player.CharacterAdded:Connect(onCharacter)
+if player.Character then
+    task.spawn(onCharacter, player.Character)
+end
+
+--================ EFFECT UPDATE =============
+RunService.RenderStepped:Connect(function(dt)
+    rainbowClock += dt
+
+    if omega and character then
+        local h = character:FindFirstChild("FloweryOmega")
+        if h then
+            h.FillColor = Color3.fromHSV((rainbowClock * 0.3) % 1, 1, 1)
+            h.OutlineColor = Color3.fromHSV(
+                (rainbowClock * 0.3 + 0.35) % 1, 1, 1
+            )
+        end
+    end
+
+    if running and root then
+        for i, clone in ipairs(clones) do
+            if clone then
+                local position = root.Position
+                    - root.CFrame.LookVector * (i * Config.CloneSpacing)
+                clone:PivotTo(CFrame.lookAt(position, position + root.CFrame.LookVector))
+
+                local color = omega
+                    and Color3.fromHSV((rainbowClock * 0.18 + i * 0.075) % 1, 1, 1)
+                    or Color3.fromRGB(40, 130, 255)
+
+                for _, obj in ipairs(clone:GetDescendants()) do
+                    if obj:IsA("BasePart") then
+                        obj.Color = color
+                    end
+                end
+            end
+        end
+    end
+
+    if charging then
+        local elapsed = math.min(os.clock() - chargeStarted, Config.MaxCharge)
+        chargeText.Text = string.format("Charge: %.3f / 3.000", elapsed)
+        bar.Size = UDim2.fromScale(elapsed / Config.MaxCharge, 1)
+
+        if elapsed >= Config.MaxCharge then
+            releaseLast()
+        end
+    end
+
+    if dashing and root then
+        local remaining = math.max(
+            0, dashDuration - (os.clock() - dashStarted)
+        )
+        dashText.Text = string.format("Dash: %.3f", remaining)
+
+        local camera = workspace.CurrentCamera
+        if camera then
+            root.AssemblyLinearVelocity =
+                camera.CFrame.LookVector * Config.LastSpeed
+        end
+
+        if remaining <= 0 then
+            dashing = false
+            dashText.Text = "Dash: 0.000"
+        end
+    end
+
+    if hoverPosition and omega and root then
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.CFrame = CFrame.new(hoverPosition) * CFrame.Angles(
+            0, math.rad(root.Orientation.Y), 0
+        )
+    end
+end)
