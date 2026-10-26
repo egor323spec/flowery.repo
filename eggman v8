@@ -1,0 +1,179 @@
+-- DASH BOOST: CAMERA + WHITE STARS + WHITE LEG SMOKE
+local RunService = game:GetService("RunService")
+
+local dashActive = false
+local DASH_SPEED = 70
+local DASH_DURATION = 3
+
+local function activateJetpack()
+    if dashActive then return end
+
+    local character = getCharacter()
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local root = character:FindFirstChild("HumanoidRootPart")
+
+    if not humanoid or not root or humanoid.Health <= 0 then
+        return
+    end
+
+    dashActive = true
+
+    local effects = Instance.new("Folder")
+    effects.Name = "EggmanDashEffects"
+    effects.Parent = character
+
+    local function addParticles(parent, name, texture, rate, size, lifetime, speed)
+        local attachment = Instance.new("Attachment")
+        attachment.Name = name .. "Attachment"
+        attachment.Parent = parent
+
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Name = name
+        emitter.Texture = texture
+        emitter.Color = ColorSequence.new(Color3.new(1, 1, 1))
+        emitter.LightEmission = 1
+        emitter.Rate = rate
+        emitter.Lifetime = lifetime
+        emitter.Speed = speed
+        emitter.SpreadAngle = Vector2.new(180, 180)
+        emitter.Size = size
+        emitter.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.1),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        emitter.Parent = attachment
+
+        return attachment
+    end
+
+    -- Белые звёздочки вокруг тела
+    addParticles(
+        root,
+        "WhiteDashStars",
+        "rbxasset://textures/particles/sparkles_main.dds",
+        100,
+        NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(1, 0)
+        }),
+        NumberRange.new(0.25, 0.6),
+        NumberRange.new(2, 7)
+    )
+
+    -- Белый дым из ног
+    local legNames = {
+        "LeftFoot", "RightFoot",
+        "Left Leg", "Right Leg"
+    }
+
+    local usedParts = {}
+
+    for _, name in ipairs(legNames) do
+        local leg = character:FindFirstChild(name)
+
+        if leg and leg:IsA("BasePart") and not usedParts[leg] then
+            usedParts[leg] = true
+
+            local attachment = Instance.new("Attachment")
+            attachment.Name = "DashSmokeAttachment"
+            attachment.Position = Vector3.new(0, -leg.Size.Y / 2, 0)
+            attachment.Parent = leg
+
+            local smoke = Instance.new("ParticleEmitter")
+            smoke.Name = "WhiteLegSmoke"
+            smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+            smoke.Color = ColorSequence.new(Color3.new(1, 1, 1))
+            smoke.LightEmission = 0.2
+            smoke.Rate = 70
+            smoke.Lifetime = NumberRange.new(0.3, 0.7)
+            smoke.Speed = NumberRange.new(2, 5)
+            smoke.SpreadAngle = Vector2.new(35, 35)
+            smoke.Size = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0.4),
+                NumberSequenceKeypoint.new(1, 1.5)
+            })
+            smoke.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0.25),
+                NumberSequenceKeypoint.new(1, 1)
+            })
+            smoke.Parent = attachment
+        end
+    end
+
+    playSound(IDS.Jetpack, false, 1)
+
+    local started = os.clock()
+
+    while os.clock() - started < DASH_DURATION do
+        if not root.Parent or humanoid.Health <= 0 then
+            break
+        end
+
+        local camera = workspace.CurrentCamera
+        if camera then
+            local move = humanoid.MoveDirection
+            local direction
+
+            if move.Magnitude > 0.05 then
+                -- WASD в направлении камеры
+                local forward = Vector3.new(
+                    camera.CFrame.LookVector.X, 0,
+                    camera.CFrame.LookVector.Z
+                )
+
+                local right = Vector3.new(
+                    camera.CFrame.RightVector.X, 0,
+                    camera.CFrame.RightVector.Z
+                )
+
+                if forward.Magnitude > 0 then
+                    forward = forward.Unit
+                end
+
+                if right.Magnitude > 0 then
+                    right = right.Unit
+                end
+
+                direction =
+                    forward * move:Dot(Vector3.new(
+                        root.CFrame.LookVector.X, 0,
+                        root.CFrame.LookVector.Z
+                    ).Unit)
+                    + right * move:Dot(Vector3.new(
+                        root.CFrame.RightVector.X, 0,
+                        root.CFrame.RightVector.Z
+                    ).Unit)
+            else
+                direction = Vector3.new(
+                    camera.CFrame.LookVector.X,
+                    0,
+                    camera.CFrame.LookVector.Z
+                )
+            end
+
+            if direction.Magnitude > 0.01 then
+                direction = direction.Unit
+
+                root.AssemblyLinearVelocity = Vector3.new(
+                    direction.X * DASH_SPEED,
+                    root.AssemblyLinearVelocity.Y,
+                    direction.Z * DASH_SPEED
+                )
+            end
+        end
+
+        RunService.Heartbeat:Wait()
+    end
+
+    effects:Destroy()
+
+    -- Удаляем дымовые эффекты с ног
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("Attachment")
+            and part.Name == "DashSmokeAttachment" then
+            part:Destroy()
+        end
+    end
+
+    dashActive = false
+end
