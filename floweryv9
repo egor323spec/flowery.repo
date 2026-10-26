@@ -1,1 +1,662 @@
+-- FLOWERY v8
+-- Q = Run | E = Jarona | G = Omega
+-- F = Last Jarona (toggle charge/release)
+-- R = Flower Man music
+-- Button: Снести 25 HP
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local RUN_TIME, RUN_COOLDOWN, MAX_CHARGE = 5, 6, 3
+
+local SFX = {
+    Death = "98744900859001",
+    Omega = "73270882643839",
+    Jarona = "95260980013578",
+    LastJarona = "132304008738886",
+    Charge = "83448418187528",
+    Spawn = "132676315734244",
+    Music = "119514747036826",
+    HereICome = "108424972802128",
+    Damage = "82109910686750",
+}
+
+local RUN_SOUND = "108424972036826"
+RUN_SOUND = "108424972802128"
+
+local NORMAL_SPEED, RUN_SPEED = 16, 500
+local OMEGA_SPEED, OMEGA_RUN_SPEED = 40, 1000
+local JARONA_SPEED = 45
+local JARONA_DURATION = 0.4
+local LAST_JARONA_DEFAULT_DURATION = 0.5
+local CLONE_INTERVAL = 0.12
+
+local function getCharacter()
+    return player.Character
+end
+
+local function getHumanoid()
+    local c = getCharacter()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot()
+    local c = getCharacter()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function playSound(id, looped, volume)
+    local r = getRoot()
+    if not r then return nil end
+
+    local s = Instance.new("Sound")
+    s.SoundId = "rbxassetid://" .. tostring(id)
+    s.Volume = volume or 1
+    s.Looped = looped == true
+    s.Parent = r
+    s:Play()
+
+    if not s.Looped then
+        s.Ended:Connect(function()
+            if s.Parent then s:Destroy() end
+        end)
+
+        task.delay(30, function()
+            if s.Parent and not s.Looped then
+                s:Destroy()
+            end
+        end)
+    end
+
+    return s
+end
+
+-- GUI
+local playerGui = player:WaitForChild("PlayerGui")
+local oldGui = playerGui:FindFirstChild("FloweryV7Gui")
+if oldGui then oldGui:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "FloweryV7Gui"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local panel = Instance.new("Frame")
+panel.Name = "Panel"
+panel.Size = UDim2.fromOffset(220, 360)
+panel.Position = UDim2.new(0, 15, 0.3, 0)
+panel.BackgroundColor3 = Color3.fromRGB(25, 20, 35)
+panel.BackgroundTransparency = 0.1
+panel.Active = true
+panel.Parent = gui
+
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+
+local function makeButton(label, y, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -16, 0, 42)
+    b.Position = UDim2.fromOffset(8, y)
+    b.BackgroundColor3 = Color3.fromRGB(85, 45, 125)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextScaled = true
+    b.Text = label
+    b.Active = true
+    b.Parent = panel
+
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    b.Activated:Connect(callback)
+    return b
+end
+
+local frozen = false
+local savedMovement
+local savedAnchored = {}
+local omegaActive = false
+local running = false
+local charging = false
+local chargeStart = 0
+local chargeSound
+local musicSound
+local musicEnabled = false
+local glow
+local rainbowConnection
+local cloneFolder
+local clonesEnabled = false
+local cloneHue = 0
+local jaronaBusy = false
+local omegaBusy = false
+local dashBusy = false
+local runReady = true
+local runButton
+local chargeButton
+local musicButton
+local damageConnection
+local lastHealth
+
+-- FULL FREEZE: immobilize every character part and restore afterward
+local function freeze(on)
+    local c = getCharacter()
+    local h = getHumanoid()
+    local r = getRoot()
+
+    if not c or not h or not r then return end
+
+    if on and not frozen then
+        frozen = true
+
+        savedMovement = {
+            WalkSpeed = h.WalkSpeed,
+            JumpPower = h.JumpPower,
+            JumpHeight = h.JumpHeight,
+            AutoRotate = h.AutoRotate,
+            PlatformStand = h.PlatformStand,
+        }
+
+        table.clear(savedAnchored)
+
+        for _, obj in ipairs(c:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                savedAnchored[obj] = obj.Anchored
+                obj.AssemblyLinearVelocity = Vector3.zero
+                obj.AssemblyAngularVelocity = Vector3.zero
+                obj.Anchored = true
+            end
+        end
+
+        h.WalkSpeed = 0
+        h.JumpPower = 0
+        h.JumpHeight = 0
+        h.AutoRotate = false
+        h:Move(Vector3.zero)
+
+    elseif not on and frozen then
+        frozen = false
+
+        for part, wasAnchored in pairs(savedAnchored) do
+            if part and part.Parent then
+                part.Anchored = wasAnchored
+                part.AssemblyLinearVelocity = Vector3.zero
+                part.AssemblyAngularVelocity = Vector3.zero
+            end
+        end
+
+        table.clear(savedAnchored)
+
+        if savedMovement and h.Parent then
+            h.WalkSpeed = savedMovement.WalkSpeed
+            h.JumpPower = savedMovement.JumpPower
+            h.JumpHeight = savedMovement.JumpHeight
+            h.AutoRotate = savedMovement.AutoRotate
+            h.PlatformStand = savedMovement.PlatformStand
+        end
+
+        savedMovement = nil
+    end
+end
+
+local function applySpeed()
+    local h = getHumanoid()
+    if not h or frozen or dashBusy then return end
+
+    if running then
+        h.WalkSpeed = omegaActive and OMEGA_RUN_SPEED or RUN_SPEED
+    else
+        h.WalkSpeed = omegaActive and OMEGA_SPEED or NORMAL_SPEED
+    end
+end
+
+local function startRainbow()
+    local c = getCharacter()
+    if not c then return end
+
+    if glow then glow:Destroy() end
+
+    glow = Instance.new("Highlight")
+    glow.Name = "FloweryOmegaGlow"
+    glow.FillTransparency = 0.25
+    glow.OutlineTransparency = 0
+    glow.Parent = c
+
+    local hue = 0
+    if rainbowConnection then rainbowConnection:Disconnect() end
+
+    rainbowConnection = RunService.Heartbeat:Connect(function(dt)
+        if not omegaActive or not glow or not glow.Parent then return end
+
+        hue = (hue + dt * 0.7) % 1
+        local color = Color3.fromHSV(hue, 1, 1)
+        glow.FillColor = color
+        glow.OutlineColor = color
+    end)
+end
+
+local function stopRainbow()
+    if rainbowConnection then
+        rainbowConnection:Disconnect()
+        rainbowConnection = nil
+    end
+
+    if glow then
+        glow:Destroy()
+        glow = nil
+    end
+end
+
+-- Rainbow clones
+local function makeClone()
+    local c = getCharacter()
+    if not c or not c.Parent then return end
+
+    if not cloneFolder or not cloneFolder.Parent then
+        cloneFolder = Instance.new("Folder")
+        cloneFolder.Name = "FloweryRainbowClones"
+        cloneFolder.Parent = workspace
+    end
+
+    local oldArchivable = c.Archivable
+    c.Archivable = true
+    local ok, clone = pcall(function()
+        return c:Clone()
+    end)
+    c.Archivable = oldArchivable
+
+    if not ok or not clone then return end
+
+    for _, obj in ipairs(clone:GetDescendants()) do
+        if obj:IsA("Script") or obj:IsA("LocalScript")
+            or obj:IsA("Tool") then
+            obj:Destroy()
+        elseif obj:IsA("BasePart") then
+            obj.Anchored = true
+            obj.CanCollide = false
+            obj.CanTouch = false
+            obj.CanQuery = false
+            obj.Material = Enum.Material.Neon
+            obj.Transparency = math.max(obj.Transparency, 0.35)
+        end
+    end
+
+    clone.Name = "FloweryRainbowClone"
+    clone.Parent = cloneFolder
+
+    cloneHue = (cloneHue + 0.12) % 1
+    local color = Color3.fromHSV(cloneHue, 1, 1)
+
+    for _, obj in ipairs(clone:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            obj.Color = color
+            TweenService:Create(
+                obj,
+                TweenInfo.new(0.45),
+                {Transparency = 1}
+            ):Play()
+        end
+    end
+
+    task.delay(0.5, function()
+        if clone and clone.Parent then clone:Destroy() end
+    end)
+end
+
+local function startClones()
+    if clonesEnabled then return end
+    clonesEnabled = true
+
+    task.spawn(function()
+        while clonesEnabled do
+            makeClone()
+            task.wait(CLONE_INTERVAL)
+        end
+    end)
+end
+
+local function stopClones()
+    clonesEnabled = false
+    if cloneFolder then
+        cloneFolder:Destroy()
+        cloneFolder = nil
+    end
+end
+
+-- Dash
+local function performDash(duration, soundId)
+    if dashBusy then return end
+
+    local h = getHumanoid()
+    local r = getRoot()
+    if not h or not r then return end
+
+    dashBusy = true
+    local oldAutoRotate = h.AutoRotate
+    h.AutoRotate = false
+    playSound(soundId, false)
+
+    local startTime = os.clock()
+    local nextCloneTime = startTime
+    local flingSign = 1
+
+    while os.clock() - startTime < duration do
+        h = getHumanoid()
+        r = getRoot()
+        if not h or not r or not getCharacter() then break end
+
+        local now = os.clock()
+        if now >= nextCloneTime then
+            makeClone()
+            nextCloneTime = now + CLONE_INTERVAL
+        end
+
+        local camera = workspace.CurrentCamera
+        if camera then
+            r.AssemblyLinearVelocity = camera.CFrame.LookVector * JARONA_SPEED
+        end
+
+        r.AssemblyAngularVelocity = Vector3.new(
+            flingSign * 18,
+            flingSign * 24,
+            flingSign * 18
+        )
+
+        flingSign = -flingSign
+        RunService.Heartbeat:Wait()
+    end
+
+    r = getRoot()
+    if r then r.AssemblyAngularVelocity = Vector3.zero end
+
+    h = getHumanoid()
+    if h then h.AutoRotate = oldAutoRotate end
+
+    dashBusy = false
+    applySpeed()
+end
+
+-- Run
+local function run()
+    if running or not runReady or frozen or dashBusy then return end
+    if not getHumanoid() then return end
+
+    running = true
+    runReady = false
+    applySpeed()
+
+    local runSfx = playSound(RUN_SOUND, false)
+    startClones()
+
+    for i = RUN_TIME, 1, -1 do
+        if not running then break end
+        if runButton then runButton.Text = "Бег: " .. i .. " сек" end
+        task.wait(1)
+    end
+
+    running = false
+    stopClones()
+
+    if runSfx and runSfx.Parent then
+        runSfx:Stop()
+        runSfx:Destroy()
+    end
+
+    applySpeed()
+
+    for i = RUN_COOLDOWN, 1, -1 do
+        if runButton then runButton.Text = "Кулдаун: " .. i end
+        task.wait(1)
+    end
+
+    runReady = true
+    if runButton then runButton.Text = "Бег [Q]" end
+end
+
+-- Jarona
+local function jarona()
+    if frozen or running or jaronaBusy or dashBusy then return end
+    if not getHumanoid() or not getRoot() then return end
+
+    jaronaBusy = true
+    performDash(JARONA_DURATION, SFX.Jarona)
+    jaronaBusy = false
+end
+
+-- Omega Flowery activation / deactivation
+local function omega()
+    if omegaBusy or frozen or running or dashBusy then return end
+    omegaBusy = true
+
+    if omegaActive then
+        omegaActive = false
+        stopRainbow()
+        applySpeed()
+        omegaBusy = false
+        return
+    end
+
+    freeze(true)
+    local s = playSound(SFX.Omega, false)
+
+    if s then
+        local ended = false
+        local connection = s.Ended:Connect(function()
+            ended = true
+        end)
+        local startTime = os.clock()
+
+        while not ended and os.clock() - startTime < 12 and s.Parent do
+            task.wait(0.1)
+        end
+
+        connection:Disconnect()
+        if s.Parent then s:Destroy() end
+    else
+        task.wait(3)
+    end
+
+    freeze(false)
+    omegaActive = true
+    startRainbow()
+    applySpeed()
+    omegaBusy = false
+end
+
+-- Last Jarona charge
+local function startCharge()
+    if not omegaActive or charging or frozen or omegaBusy
+        or running or dashBusy then return end
+
+    charging = true
+    chargeStart = os.clock()
+    freeze(true)
+
+    chargeSound = playSound(SFX.Charge, false)
+    if chargeButton then chargeButton.Text = "Зарядка: 0.000" end
+
+    task.spawn(function()
+        while charging do
+            local elapsed = math.min(os.clock() - chargeStart, MAX_CHARGE)
+            if chargeButton then
+                chargeButton.Text = string.format("Зарядка: %.3f", elapsed)
+            end
+            if elapsed >= MAX_CHARGE then break end
+            task.wait(0.03)
+        end
+    end)
+end
+
+local function releaseCharge()
+    if not charging then return end
+    charging = false
+
+    local elapsed = math.clamp(os.clock() - chargeStart, 0, MAX_CHARGE)
+
+    if chargeSound then
+        chargeSound:Stop()
+        chargeSound:Destroy()
+        chargeSound = nil
+    end
+
+    freeze(false)
+
+    if omegaActive then
+        local dashDuration = elapsed < 0.05
+            and LAST_JARONA_DEFAULT_DURATION or elapsed
+
+        task.spawn(function()
+            performDash(dashDuration, SFX.LastJarona)
+        end)
+    end
+
+    applySpeed()
+    if chargeButton then chargeButton.Text = "Last Jarona [F]" end
+end
+
+-- Flower Man music
+local function toggleFlowerManMusic()
+    if musicEnabled then
+        musicEnabled = false
+
+        if musicSound then
+            musicSound:Stop()
+            musicSound:Destroy()
+            musicSound = nil
+        end
+
+        if musicButton then musicButton.Text = "Flower Man [R]: OFF" end
+        return
+    end
+
+    local r = getRoot()
+    if not r then return end
+
+    musicEnabled = true
+    musicSound = Instance.new("Sound")
+    musicSound.Name = "FloweryFlowerManMusic"
+    musicSound.SoundId = "rbxassetid://" .. SFX.Music
+    musicSound.Volume = 0.5
+    musicSound.Looped = true
+    musicSound.Parent = r
+    musicSound:Play()
+
+    if musicButton then musicButton.Text = "Flower Man [R]: ON" end
+end
+
+-- Damage sound: play whenever health decreases
+local function trackDamageSound(character)
+    if damageConnection then
+        damageConnection:Disconnect()
+        damageConnection = nil
+    end
+
+    local h = character:WaitForChild("Humanoid", 10)
+    if not h then return end
+
+    lastHealth = h.Health
+    damageConnection = h.HealthChanged:Connect(function(newHealth)
+        if lastHealth and newHealth < lastHealth and newHealth > 0 then
+            playSound(SFX.Damage, false)
+        end
+        lastHealth = newHealth
+    end)
+end
+
+-- Buttons
+runButton = makeButton("Бег [Q]", 8, function()
+    task.spawn(run)
+end)
+
+makeButton("Jarona [E]", 58, function()
+    task.spawn(jarona)
+end)
+
+makeButton("Omega [G]", 108, function()
+    task.spawn(omega)
+end)
+
+chargeButton = makeButton("Last Jarona [F]", 158, function()
+    if charging then releaseCharge() else startCharge() end
+end)
+
+musicButton = makeButton("Flower Man [R]: OFF", 208, function()
+    toggleFlowerManMusic()
+end)
+
+makeButton("Снести 25 HP", 258, function()
+    local h = getHumanoid()
+    if h and h.Health > 0 then
+        h.Health = math.max(0, h.Health - 25)
+        playSound(SFX.HereICome, false)
+    end
+end)
+
+-- Keyboard controls
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        task.spawn(run)
+    elseif input.KeyCode == Enum.KeyCode.E then
+        task.spawn(jarona)
+    elseif input.KeyCode == Enum.KeyCode.G then
+        task.spawn(omega)
+    elseif input.KeyCode == Enum.KeyCode.F then
+        if charging then releaseCharge() else startCharge() end
+    elseif input.KeyCode == Enum.KeyCode.R then
+        toggleFlowerManMusic()
+    end
+end)
+
+-- Death and respawn cleanup
+local function cleanupForDeath()
+    running = false
+    charging = false
+    dashBusy = false
+    jaronaBusy = false
+    omegaBusy = false
+
+    if frozen then freeze(false) end
+
+    stopClones()
+    stopRainbow()
+    omegaActive = false
+
+    if chargeSound then
+        chargeSound:Stop()
+        chargeSound:Destroy()
+        chargeSound = nil
+    end
+
+    if musicSound then
+        musicSound:Stop()
+        musicSound:Destroy()
+        musicSound = nil
+    end
+
+    musicEnabled = false
+    if musicButton then musicButton.Text = "Flower Man [R]: OFF" end
+    if chargeButton then chargeButton.Text = "Last Jarona [F]" end
+
+    local h = getHumanoid()
+    if h then h.WalkSpeed = NORMAL_SPEED end
+end
+
+player.CharacterAdded:Connect(function(character)
+    cleanupForDeath()
+    task.spawn(trackDamageSound, character)
+end)
+
+player.CharacterRemoving:Connect(function()
+    cleanupForDeath()
+end)
+
+if player.Character then
+    task.spawn(trackDamageSound, player.Character)
+end
+
+-- Reset the character's speed while the script is active
+RunService.Heartbeat:Connect(function()
+    if not frozen and not dashBusy then
+        applySpeed()
+    end
+end)
 
