@@ -1,0 +1,125 @@
+end
+
+-- Buttons
+runButton = makeButton("Бег [Q]", 8, function() task.spawn(run) end)
+makeButton("Jarona [E]", 58, function() task.spawn(jarona) end)
+makeButton("Omega [G]", 108, function() task.spawn(omega) end)
+chargeButton = makeButton("Last Jarona [F]", 158, function()
+    if charging then releaseCharge() else startCharge() end
+end)
+musicButton = makeButton("Flower Man [R]: OFF", 208, function()
+    toggleFlowerManMusic()
+end)
+
+makeButton("Снести 25 HP", 258, function()
+    local h = getHumanoid()
+    if h and h.Health > 0 then
+        local remainingHealth = h.Health - 25
+        h.Health = math.max(0, remainingHealth)
+        if remainingHealth > 0 then playSound(SFX.Damage, false) end
+    end
+end)
+
+-- Death cleanup
+local function cleanupForDeath()
+    running = false
+    charging = false
+    local h = getHumanoid()
+    local r = getRoot()
+
+    if frozen and h and r and savedMovement then
+        r.Anchored = savedMovement.Anchored or false
+        h.PlatformStand = savedMovement.PlatformStand or false
+        h.WalkSpeed = savedMovement.WalkSpeed
+        h.JumpPower = savedMovement.JumpPower
+        h.JumpHeight = savedMovement.JumpHeight
+        h.AutoRotate = savedMovement.AutoRotate
+    end
+
+    frozen = false
+    savedMovement = nil
+    dashBusy = false
+    jaronaBusy = false
+    stopClones()
+    stopRainbow()
+    omegaActive = false
+
+    if chargeSound then
+        chargeSound:Stop()
+        chargeSound:Destroy()
+        chargeSound = nil
+    end
+    if musicSound then
+        musicSound:Stop()
+        musicSound:Destroy()
+        musicSound = nil
+    end
+    musicEnabled = false
+    if musicButton then musicButton.Text = "Flower Man [R]: OFF" end
+end
+
+-- Character sounds: spawn and death
+local characterConnections = {}
+
+local function setupCharacter(character)
+    for _, connection in ipairs(characterConnections) do connection:Disconnect() end
+    table.clear(characterConnections)
+
+    local humanoid = character:WaitForChild("Humanoid", 10)
+    local root = character:WaitForChild("HumanoidRootPart", 10)
+    if not humanoid or not root then return end
+
+    local spawnSound = Instance.new("Sound")
+    spawnSound.SoundId = "rbxassetid://" .. SFX.Spawn
+    spawnSound.Volume = 1
+    spawnSound.Parent = root
+    spawnSound:Play()
+    spawnSound.Ended:Connect(function()
+        if spawnSound.Parent then spawnSound:Destroy() end
+    end)
+    task.delay(30, function()
+        if spawnSound.Parent then spawnSound:Destroy() end
+    end)
+
+    table.insert(characterConnections, humanoid.Died:Connect(function()
+        local deathSound = Instance.new("Sound")
+        deathSound.SoundId = "rbxassetid://" .. SFX.Death
+        deathSound.Volume = 1
+        deathSound.Parent = root
+        deathSound:Play()
+        deathSound.Ended:Connect(function()
+            if deathSound.Parent then deathSound:Destroy() end
+        end)
+        task.delay(30, function()
+            if deathSound.Parent then deathSound:Destroy() end
+        end)
+        cleanupForDeath()
+    end))
+end
+
+player.CharacterAdded:Connect(function(character)
+    task.spawn(setupCharacter, character)
+end)
+if player.Character then task.spawn(setupCharacter, player.Character) end
+
+-- Keyboard controls
+UIS.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.Q then
+        task.spawn(run)
+    elseif input.KeyCode == Enum.KeyCode.E then
+        task.spawn(jarona)
+    elseif input.KeyCode == Enum.KeyCode.G then
+        task.spawn(omega)
+    elseif input.KeyCode == Enum.KeyCode.F then
+        startCharge()
+    elseif input.KeyCode == Enum.KeyCode.R then
+        toggleFlowerManMusic()
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.F then
+        releaseCharge()
+    end
+end)
