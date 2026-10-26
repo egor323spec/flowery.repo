@@ -1,0 +1,396 @@
+-- FLOWERY DELTA SCRIPT
+-- R6 | Screen buttons | Keyboard controls
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local function getChar()
+    return player.Character
+end
+
+local RUN_SPEED = 500
+local OMEGA_SPEED = 40
+local OMEGA_RUN_SPEED = 1000
+local RUN_TIME = 5
+local RUN_COOLDOWN = 6
+local JARONA_TIME = 0.4
+local MAX_CHARGE = 3
+
+local SFX = {
+    Spawn = "87619134157949", -- It's Me, Flowery
+    Run = "108424972802128", -- Here I Come San Francisco!
+    Jarona = "129824937730574",
+    LastJarona = "124203418885702",
+    Omega = "87872050816795",
+    Music = "87619134157949"
+}
+
+local RUN_ANIMATION_ID = "79797127992511"
+
+local oldGui = player.PlayerGui:FindFirstChild("FloweryGui")
+if oldGui then oldGui:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "FloweryGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 210, 0, 250)
+frame.Position = UDim2.new(0, 15, 0.35, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 20, 35)
+frame.BackgroundTransparency = 0.12
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
+
+local function button(label, y, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -16, 0, 42)
+    b.Position = UDim2.new(0, 8, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(85, 45, 125)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextScaled = true
+    b.Text = label
+    b.Parent = frame
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 8)
+    c.Parent = b
+    b.Activated:Connect(callback)
+    return b
+end
+
+local function playSound(id, looped)
+    local char = getChar()
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = 1
+    sound.Looped = looped or false
+    sound.Parent = root
+    sound:Play()
+
+    if not sound.Looped then
+        sound.Ended:Connect(function()
+            sound:Destroy()
+        end)
+    end
+    return sound
+end
+
+local function getHumanoid()
+    local char = getChar()
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot()
+    local char = getChar()
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+-- Freeze movement, including jumping
+local frozen = false
+local savedMovement
+
+local function freeze(on)
+    local hum = getHumanoid()
+    if not hum then return end
+
+    if on and not frozen then
+        frozen = true
+        savedMovement = {
+            WalkSpeed = hum.WalkSpeed,
+            JumpPower = hum.JumpPower,
+            JumpHeight = hum.JumpHeight,
+            AutoRotate = hum.AutoRotate
+        }
+        hum.WalkSpeed = 0
+        hum.JumpPower = 0
+        hum.JumpHeight = 0
+        hum.AutoRotate = false
+        hum:ChangeState(Enum.HumanoidStateType.Physics)
+    elseif not on and frozen then
+        frozen = false
+        if savedMovement then
+            hum.WalkSpeed = savedMovement.WalkSpeed
+            hum.JumpPower = savedMovement.JumpPower
+            hum.JumpHeight = savedMovement.JumpHeight
+            hum.AutoRotate = savedMovement.AutoRotate
+        end
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end
+
+-- Create non-colliding visual afterimage clones while running
+local clonesEnabled = false
+local cloneFolder
+
+local function makeClone()
+    local char = getChar()
+    if not char then return end
+
+    if not cloneFolder or not cloneFolder.Parent then
+        cloneFolder = Instance.new("Folder")
+        cloneFolder.Name = "FloweryRunClones"
+        cloneFolder.Parent = workspace
+    end
+
+    local clone
+    local ok = pcall(function()
+        clone = char:Clone()
+    end)
+    if not ok or not clone then return end
+
+    for _, obj in ipairs(clone:GetDescendants()) do
+        if obj:IsA("Script") or obj:IsA("LocalScript")
+            or obj:IsA("Tool") then
+            obj:Destroy()
+        elseif obj:IsA("BasePart") then
+            obj.Anchored = true
+            obj.CanCollide = false
+            obj.CanTouch = false
+            obj.CanQuery = false
+            obj.Material = Enum.Material.Neon
+            obj.Color = Color3.fromRGB(80, 170, 255)
+            obj.Transparency = math.max(obj.Transparency, 0.35)
+        end
+    end
+
+    clone.Name = "FloweryAfterimage"
+    clone.Parent = cloneFolder
+
+    for _, obj in ipairs(clone:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            TweenService:Create(
+                obj,
+                TweenInfo.new(0.45),
+                {Transparency = 1}
+            ):Play()
+        end
+    end
+
+    task.delay(0.5, function()
+        if clone then clone:Destroy() end
+    end)
+end
+
+local function clearClones()
+    clonesEnabled = false
+    if cloneFolder then
+        cloneFolder:Destroy()
+        cloneFolder = nil
+    end
+end
+
+local function createClonesForRun()
+    clonesEnabled = true
+    task.spawn(function()
+        while clonesEnabled do
+            makeClone()
+            task.wait(0.12)
+        end
+    end)
+end
+
+-- Run: 5 seconds, 6-second cooldown
+local running = false
+local runReady = true
+local runButton
+
+local function run()
+    if running or not runReady then return end
+    local hum = getHumanoid()
+    if not hum then return end
+
+    running = true
+    runReady = false
+
+    local oldSpeed = hum.WalkSpeed
+    hum.WalkSpeed = RUN_SPEED
+
+    local animator = hum:FindFirstChildOfClass("Animator")
+    local track
+    if animator then
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. RUN_ANIMATION_ID
+        pcall(function()
+            track = animator:LoadAnimation(anim)
+            track:Play()
+        end)
+    end
+
+    playSound(SFX.Run, false)
+    createClonesForRun()
+
+    if runButton then runButton.Text = "Бег: 5 сек" end
+    for i = RUN_TIME, 1, -1 do
+        if runButton then runButton.Text = "Бег: " .. i .. " сек" end
+        task.wait(1)
+    end
+
+    clearClones()
+    if track then track:Stop() end
+    hum = getHumanoid()
+    if hum then hum.WalkSpeed = oldSpeed end
+
+    running = false
+    for i = RUN_COOLDOWN, 1, -1 do
+        if runButton then runButton.Text = "Перезарядка: " .. i end
+        task.wait(1)
+    end
+
+    runReady = true
+    if runButton then runButton.Text = "Бег [Q]" end
+end
+
+local function jarona()
+    if running or frozen then return end
+    local hum = getHumanoid()
+    local root = getRoot()
+    if not hum or not root then return end
+
+    local oldSpeed = hum.WalkSpeed
+    hum.WalkSpeed = 0
+    playSound(SFX.Jarona, false)
+    makeClone()
+
+    root.AssemblyLinearVelocity = root.CFrame.LookVector * 120
+    task.wait(JARONA_TIME)
+
+    hum = getHumanoid()
+    if hum then hum.WalkSpeed = oldSpeed end
+end
+
+local function omega()
+    local hum = getHumanoid()
+    if not hum then return end
+
+    freeze(true)
+    local sound = playSound(SFX.Omega, false)
+    if sound then
+        sound.Ended:Wait()
+    else
+        task.wait(3)
+    end
+    freeze(false)
+end
+
+local charging = false
+local chargeStart = 0
+local chargeButton
+
+local function startCharge()
+    if charging or frozen then return end
+    charging = true
+    chargeStart = os.clock()
+    freeze(true)
+
+    local sound = playSound(SFX.LastJarona, false)
+    if chargeButton then chargeButton.Text = "Зарядка: 0.000 сек" end
+
+    task.spawn(function()
+        while charging do
+            local elapsed = math.min(os.clock() - chargeStart, MAX_CHARGE)
+            if chargeButton then
+                chargeButton.Text = string.format(
+                    "Зарядка: %.3f сек", elapsed
+                )
+            end
+            if elapsed >= MAX_CHARGE then break end
+            task.wait(0.01)
+        end
+    end)
+end
+
+local function releaseCharge()
+    if not charging then return end
+    charging = false
+
+    local elapsed = math.clamp(os.clock() - chargeStart, 0, MAX_CHARGE)
+    freeze(false)
+
+    local root = getRoot()
+    if root then
+        makeClone()
+        root.AssemblyLinearVelocity =
+            root.CFrame.LookVector * (80 + elapsed * 100)
+    end
+
+    if chargeButton then chargeButton.Text = "Last Jarona [F]" end
+end
+
+runButton = button("Бег [Q]", 8, function()
+    task.spawn(run)
+end)
+
+button("Jarona [E]", 58, function()
+    task.spawn(jarona)
+end)
+
+button("Omega [G]", 108, function()
+    task.spawn(omega)
+end)
+
+chargeButton = button("Last Jarona [F]", 158, function()
+    if charging then
+        releaseCharge()
+    else
+        startCharge()
+    end
+end)
+
+-- Spawn sound and Flower Man music
+local musicSound
+
+local function onCharacter(char)
+    task.wait(1)
+    if not char.Parent then return end
+    playSound(SFX.Spawn, false)
+
+    if musicSound then
+        musicSound:Destroy()
+        musicSound = nil
+    end
+
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root then
+        musicSound = Instance.new("Sound")
+        musicSound.SoundId = "rbxassetid://" .. SFX.Music
+        musicSound.Volume = 0.5
+        musicSound.Looped = true
+        musicSound.Parent = root
+        musicSound:Play()
+    end
+end
+
+player.CharacterAdded:Connect(onCharacter)
+if player.Character then
+    task.spawn(onCharacter, player.Character)
+end
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        task.spawn(run)
+    elseif input.KeyCode == Enum.KeyCode.E then
+        task.spawn(jarona)
+    elseif input.KeyCode == Enum.KeyCode.G then
+        task.spawn(omega)
+    elseif input.KeyCode == Enum.KeyCode.F then
+        startCharge()
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.F then
+        releaseCharge()
+    end
+end)
