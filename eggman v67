@@ -1,0 +1,390 @@
+
+-- EGGMAN V4 — FLOWERY STYLE UI
+-- Shield: 5 studs diameter
+-- Shield duration: 5 seconds
+-- Jetpack duration: 3 seconds
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+
+local SHIELD_RADIUS = 2.5
+local SHIELD_DURATION = 5
+local JETPACK_DURATION = 3
+local AUTO_BOOST_DURATION = 3
+local AUTO_BOOST_INTERVAL = 0.00001
+
+local IDS = {
+    CrackedEmpire = "87493231115640",
+    Shield = "121620484878674",
+    Explosion = "107417919520477",
+    Jetpack = "126742809369490",
+    MasterPlan = "109603358638247"
+}
+
+local function getCharacter()
+    return player.Character or player.CharacterAdded:Wait()
+end
+
+local function getRoot()
+    return getCharacter():FindFirstChild("HumanoidRootPart")
+end
+
+local function playSound(id, looped, volume)
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = volume or 1
+    sound.Looped = looped or false
+    sound.Parent = SoundService
+    sound:Play()
+
+    if not looped then
+        sound.Ended:Connect(function()
+            sound:Destroy()
+        end)
+    end
+
+    return sound
+end
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanV4"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 280, 0, 380)
+frame.Position = UDim2.new(0.04, 0, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 10, 35)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(190, 60, 255)
+stroke.Thickness = 2
+stroke.Parent = frame
+
+-- Drag window
+local dragging = false
+local dragStart, startPos
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -15, 0, 38)
+title.Position = UDim2.new(0, 10, 0, 2)
+title.BackgroundTransparency = 1
+title.Text = "EGGMAN V4"
+title.TextColor3 = Color3.fromRGB(255, 90, 40)
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 22
+title.Parent = frame
+
+local function makeButton(text, y, color, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -24, 0, 36)
+    button.Position = UDim2.new(0, 12, 0, y)
+    button.BackgroundColor3 = color
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 12
+    button.Text = text
+    button.Parent = frame
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 8)
+    c.Parent = button
+
+    button.Activated:Connect(callback)
+    return button
+end
+
+-- ENERGY SHIELD
+local shieldActive = false
+
+local function activateShield()
+    if shieldActive then return end
+
+    local root = getRoot()
+    if not root then return end
+
+    shieldActive = true
+
+    local shield = Instance.new("Part")
+    shield.Name = "EggmanEnergyShield"
+    shield.Shape = Enum.PartType.Ball
+    shield.Size = Vector3.new(0.2, 0.2, 0.2)
+    shield.Material = Enum.Material.ForceField
+    shield.Color = Color3.fromRGB(0, 200, 255)
+    shield.Transparency = 0.3
+    shield.CanCollide = false
+    shield.Anchored = false
+    shield.Massless = true
+    shield.CFrame = root.CFrame
+    shield.Parent = workspace
+
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = root
+    weld.Part1 = shield
+    weld.Parent = shield
+
+    TweenService:Create(
+        shield,
+        TweenInfo.new(0.25),
+        {Size = Vector3.new(5, 5, 5)}
+    ):Play()
+
+    playSound(IDS.Shield, false, 1)
+
+    task.delay(SHIELD_DURATION - 0.5, function()
+        if shield.Parent then
+            TweenService:Create(
+                shield,
+                TweenInfo.new(0.5),
+                {
+                    Size = Vector3.new(0.2, 0.2, 0.2),
+                    Transparency = 1
+                }
+            ):Play()
+
+            task.wait(0.5)
+            if shield.Parent then shield:Destroy() end
+        end
+
+        shieldActive = false
+    end)
+end
+
+-- JETPACK BOOST
+local jetpackActive = false
+
+local function activateJetpack()
+    if jetpackActive then return end
+
+    local character = getCharacter()
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local root = character:FindFirstChild("HumanoidRootPart")
+
+    if not humanoid or not root then return end
+
+    jetpackActive = true
+    local oldSpeed = humanoid.WalkSpeed
+
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = root
+
+    local particles = Instance.new("ParticleEmitter")
+    particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    particles.Color = ColorSequence.new(Color3.new(1, 1, 1))
+    particles.Rate = 100
+    particles.Lifetime = NumberRange.new(0.2, 0.5)
+    particles.Speed = NumberRange.new(5, 12)
+    particles.Parent = attachment
+
+    humanoid.WalkSpeed = 100
+    playSound(IDS.Jetpack, false, 1)
+
+    task.delay(JETPACK_DURATION, function()
+        if humanoid.Parent then
+            humanoid.WalkSpeed = oldSpeed
+        end
+
+        if attachment.Parent then
+            attachment:Destroy()
+        end
+
+        jetpackActive = false
+    end)
+end
+
+-- AUTO HACKERPACK BOOST
+local autoHackerpackActive = false
+
+local function autoHackerpackBoost()
+    if autoHackerpackActive then return end
+
+    autoHackerpackActive = true
+    local started = os.clock()
+
+    task.spawn(function()
+        while autoHackerpackActive
+            and os.clock() - started < AUTO_BOOST_DURATION do
+
+            activateJetpack()
+            task.wait(AUTO_BOOST_INTERVAL)
+        end
+
+        autoHackerpackActive = false
+    end)
+end
+
+-- SHIELD HIT VISUAL
+local function shieldHit()
+    local root = getRoot()
+    if not root then return end
+
+    local wave = Instance.new("Part")
+    wave.Name = "EggmanShieldWave"
+    wave.Shape = Enum.PartType.Ball
+    wave.Size = Vector3.new(1, 1, 1)
+    wave.Material = Enum.Material.Neon
+    wave.Color = Color3.fromRGB(0, 220, 255)
+    wave.Transparency = 0.25
+    wave.Anchored = true
+    wave.CanCollide = false
+    wave.CFrame = root.CFrame
+    wave.Parent = workspace
+
+    local size = SHIELD_RADIUS * 4
+
+    TweenService:Create(
+        wave,
+        TweenInfo.new(0.45),
+        {
+            Size = Vector3.new(size, size, size),
+            Transparency = 1
+        }
+    ):Play()
+
+    playSound(IDS.Explosion, false, 1)
+
+    task.delay(0.5, function()
+        if wave.Parent then wave:Destroy() end
+    end)
+end
+
+-- CRACKED EMPIRE
+local music
+local musicOn = false
+local musicButton
+
+local function toggleMusic()
+    if musicOn then
+        musicOn = false
+
+        if music then
+            music:Stop()
+            music:Destroy()
+            music = nil
+        end
+
+        musicButton.Text = "CRACKED EMPIRE: OFF"
+    else
+        musicOn = true
+        music = playSound(IDS.CrackedEmpire, true, 1)
+        musicButton.Text = "CRACKED EMPIRE: ON"
+    end
+end
+
+-- MASTER PLAN
+local function playMasterPlan()
+    playSound(IDS.MasterPlan, false, 1)
+end
+
+-- BUTTONS
+makeButton(
+    "ENERGY SHIELD [E]",
+    45,
+    Color3.fromRGB(0, 115, 180),
+    activateShield
+)
+
+makeButton(
+    "JETPACK BOOST [Q]",
+    86,
+    Color3.fromRGB(180, 80, 20),
+    activateJetpack
+)
+
+makeButton(
+    "AUTO HACKERPACK BOOST",
+    127,
+    Color3.fromRGB(200, 40, 100),
+    autoHackerpackBoost
+)
+
+makeButton(
+    "SHIELD HIT",
+    168,
+    Color3.fromRGB(0, 140, 160),
+    shieldHit
+)
+
+musicButton = makeButton(
+    "CRACKED EMPIRE: OFF",
+    209,
+    Color3.fromRGB(130, 20, 100),
+    toggleMusic
+)
+
+makeButton(
+    "MASTER PLAN",
+    250,
+    Color3.fromRGB(130, 60, 20),
+    playMasterPlan
+)
+
+makeButton(
+    "CLOSE MENU",
+    291,
+    Color3.fromRGB(100, 25, 35),
+    function()
+        autoHackerpackActive = false
+
+        if music then
+            music:Stop()
+            music:Destroy()
+        end
+
+        gui:Destroy()
+    end
+)
+
+-- KEYBINDS
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.E then
+        activateShield()
+    elseif input.KeyCode == Enum.KeyCode.Q then
+        activateJetpack()
+    end
+end)
