@@ -1,42 +1,4 @@
--- FLOWERY V5 - Roblox Studio
--- StarterPlayer > StarterPlayerScripts > LocalScript
-local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
-
---================ SETTINGS ================
-local Config = {
-    RunKey = Enum.KeyCode.Q,
-    JaronaKey = Enum.KeyCode.E,
-    OmegaKey = Enum.KeyCode.G,
-    LastKey = Enum.KeyCode.F,
-
-    NormalSpeed = 16,
-    RunSpeed = 500,
-    OmegaRunSpeed = 1000,
-
-    JaronaSpeed = 45,
-    JaronaDuration = 0.4,
-
-    LastSpeed = 45,
-    MaxCharge = 3,
-    MinLastDuration = 0.5,
-    MaxLastDuration = 3.5,
-
-    CloneCount = 10,
-    CloneSpacing = 3,
-    HoverMaxTime = 10,
-}
-
-local Sounds = {
-    Spawn = "87619134157949",
-    Run = "108424972802128",
-    Jarona = "129824937730574",
-    LastJarona = "124203418885702",
-    Omega = "87872050816795",
-    Charge = "83448418187528",
 }
 
 local RunAnimationId = "79797127992511"
