@@ -1,0 +1,401 @@
+-- FLOWERY MENU
+-- Delta / Roblox client-side script
+-- Server-side limits and anti-cheat are not bypassed.
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+local CFG = {
+    NormalSpeed = 16,
+    RunSpeed = 500,
+    OmegaSpeed = 40,
+    OmegaRunSpeed = 1000,
+    DashSpeed = 45,
+    JaronaDuration = 0.4,
+    MinLastDuration = 0.5,
+    MaxCharge = 3,
+    CloneCount = 10,
+    RunAnimation = "79797127992511",
+}
+
+local SFX = {
+    Run = "108424972802128",
+    Jarona = "129824937730574",
+    LastJarona = "124203418885702",
+    Omega = "87872050816795",
+    Music = "87619134157949",
+}
+
+local running, omega, charging = false, false, false
+local musicSound, runTrack, highlight
+local chargeStart, dashUntil, hue = 0, 0, 0
+local frozen = false
+local clones = {}
+local saved = {}
+
+local function getCharacter()
+    return player.Character
+end
+
+local function getHumanoid()
+    local c = getCharacter()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot()
+    local c = getCharacter()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function playSound(id, looped)
+    local root = getRoot()
+    if not root then return end
+
+    local s = Instance.new("Sound")
+    s.SoundId = "rbxassetid://" .. id
+    s.Volume = 1
+    s.Looped = looped or false
+    s.Parent = root
+    s:Play()
+
+    if not s.Looped then
+        s.Ended:Connect(function()
+            s:Destroy()
+        end)
+    end
+
+    return s
+end
+
+local function updateSpeed()
+    local h = getHumanoid()
+    if not h or frozen then return end
+
+    if running then
+        h.WalkSpeed = omega and CFG.OmegaRunSpeed or CFG.RunSpeed
+    else
+        h.WalkSpeed = omega and CFG.OmegaSpeed or CFG.NormalSpeed
+    end
+end
+
+local function freeze()
+    local h, root = getHumanoid(), getRoot()
+    if not h or not root or frozen then return end
+
+    frozen = true
+    saved.speed = h.WalkSpeed
+    saved.jumpPower = h.JumpPower
+    saved.jumpHeight = h.JumpHeight
+    saved.rotate = h.AutoRotate
+    saved.position = root.CFrame
+
+    h.WalkSpeed = 0
+    h.JumpPower = 0
+    h.JumpHeight = 0
+    h.AutoRotate = false
+    h:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+    h:ChangeState(Enum.HumanoidStateType.Physics)
+
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function unfreeze()
+    local h, root = getHumanoid(), getRoot()
+    if not frozen then return end
+
+    frozen = false
+
+    if h then
+        h.WalkSpeed = saved.speed or CFG.NormalSpeed
+        h.JumpPower = saved.jumpPower or 50
+        h.JumpHeight = saved.jumpHeight or 7.2
+        h.AutoRotate = saved.rotate ~= false
+        h:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+        h:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+
+    if root then
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+
+    updateSpeed()
+end
+
+local function clearClones()
+    for _, clone in ipairs(clones) do
+        if clone and clone.Parent then
+            clone:Destroy()
+        end
+    end
+    table.clear(clones)
+end
+
+local function createClones()
+    clearClones()
+
+    for i = 1, CFG.CloneCount do
+        local p = Instance.new("Part")
+        p.Name = "FloweryAfterimage"
+        p.Size = Vector3.new(2, 3, 1)
+        p.Anchored = true
+        p.CanCollide = false
+        p.CastShadow = false
+        p.Material = Enum.Material.Neon
+        p.Transparency = 0.3
+        p.Color = Color3.fromRGB(0, 170, 255)
+        p.Parent = workspace
+        clones[i] = p
+    end
+end
+
+local function dash(duration, soundId)
+    if not getRoot() then return end
+    createClones()
+    playSound(soundId, false)
+    dashUntil = os.clock() + duration
+
+    task.delay(duration, function()
+        if os.clock() >= dashUntil then
+            clearClones()
+        end
+    end)
+end
+
+local function jarona()
+    if not charging then
+        dash(CFG.JaronaDuration, SFX.Jarona)
+    end
+end
+
+local function beginLast()
+    if charging then return end
+    charging = true
+    chargeStart = os.clock()
+    freeze()
+end
+
+local function releaseLast()
+    if not charging then return end
+
+    local charge = math.clamp(os.clock() - chargeStart, 0, CFG.MaxCharge)
+    charging = false
+    unfreeze()
+    dash(CFG.MinLastDuration + charge, SFX.LastJarona)
+end
+
+local function toggleRun()
+    running = not running
+    updateSpeed()
+
+    if running then
+        playSound(SFX.Run, false)
+
+        local h = getHumanoid()
+        local animator = h and h:FindFirstChildOfClass("Animator")
+        if animator then
+            local anim = Instance.new("Animation")
+            anim.AnimationId = "rbxassetid://" .. CFG.RunAnimation
+
+            local ok, track = pcall(function()
+                return animator:LoadAnimation(anim)
+            end)
+
+            if ok then
+                runTrack = track
+                runTrack.Looped = true
+                runTrack:Play()
+            end
+        end
+    elseif runTrack then
+        runTrack:Stop()
+        runTrack = nil
+    end
+end
+
+local function toggleOmega()
+    omega = not omega
+    updateSpeed()
+    if omega then
+        playSound(SFX.Omega, false)
+    end
+end
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "FloweryMenu"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.fromOffset(245, 355)
+panel.Position = UDim2.new(0, 20, 0.3, 0)
+panel.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
+panel.BorderSizePixel = 0
+panel.Parent = gui
+
+local panelCorner = Instance.new("UICorner")
+panelCorner.CornerRadius = UDim.new(0, 10)
+panelCorner.Parent = panel
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 35)
+title.BackgroundTransparency = 1
+title.Text = "FLOWERY"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = panel
+
+local timer = Instance.new("TextLabel")
+timer.Size = UDim2.new(1, -12, 0, 25)
+timer.Position = UDim2.fromOffset(6, 35)
+timer.BackgroundTransparency = 1
+timer.Text = "CHARGE: 0.000s"
+timer.TextColor3 = Color3.fromRGB(100, 220, 255)
+timer.TextScaled = true
+timer.Parent = panel
+
+local function makeButton(text, y, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, 38)
+    b.Position = UDim2.fromOffset(10, y)
+    b.BackgroundColor3 = Color3.fromRGB(45, 55, 75)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextScaled = true
+    b.Font = Enum.Font.GothamBold
+    b.Text = text
+    b.Parent = panel
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = b
+
+    b.Activated:Connect(callback)
+    return b
+end
+
+makeButton("RUN [Q]", 66, toggleRun)
+makeButton("JARONA [E]", 110, jarona)
+makeButton("OMEGA FLOWERY [G]", 154, toggleOmega)
+
+local lastButton = makeButton("LAST JARONA [F]", 198, function()
+    if charging then
+        releaseLast()
+    else
+        beginLast()
+    end
+end)
+
+local musicButton = makeButton("MUSIC: ON", 242, function()
+    if musicSound then
+        musicSound:Stop()
+        musicSound:Destroy()
+        musicSound = nil
+        musicButton.Text = "MUSIC: ON"
+    else
+        musicSound = playSound(SFX.Music, true)
+        musicButton.Text = "MUSIC: OFF"
+    end
+end)
+
+makeButton("CLOSE MENU", 286, function()
+    gui.Enabled = false
+end)
+
+-- Keyboard controls
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        toggleRun()
+    elseif input.KeyCode == Enum.KeyCode.E then
+        jarona()
+    elseif input.KeyCode == Enum.KeyCode.G then
+        toggleOmega()
+    elseif input.KeyCode == Enum.KeyCode.F then
+        beginLast()
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.F then
+        releaseLast()
+    end
+end)
+
+-- Visual effects and charge timer
+RunService.RenderStepped:Connect(function(dt)
+    hue = (hue + dt * 0.5) % 1
+
+    local root = getRoot()
+    local char = getCharacter()
+
+    if charging then
+        local elapsed = math.clamp(os.clock() - chargeStart, 0, CFG.MaxCharge)
+        timer.Text = string.format("CHARGE: %.3fs", elapsed)
+        lastButton.Text = "RELEASE TO DASH"
+    else
+        timer.Text = "CHARGE: 0.000s"
+        lastButton.Text = "LAST JARONA [F]"
+    end
+
+    if omega and char then
+        if not highlight or highlight.Parent ~= char then
+            if highlight then highlight:Destroy() end
+            highlight = Instance.new("Highlight")
+            highlight.Name = "OmegaHighlight"
+            highlight.Parent = char
+        end
+
+        highlight.FillColor = Color3.fromHSV(hue, 1, 1)
+        highlight.OutlineColor = Color3.fromHSV((hue + 0.5) % 1, 1, 1)
+        highlight.FillTransparency = 0.35
+        highlight.OutlineTransparency = 0
+    elseif highlight then
+        highlight:Destroy()
+        highlight = nil
+    end
+
+    if frozen and root then
+        root.CFrame = saved.position or root.CFrame
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+
+    elseif root and os.clock() < dashUntil then
+        local camera = workspace.CurrentCamera
+        if camera then
+            root.AssemblyLinearVelocity = camera.CFrame.LookVector * CFG.DashSpeed
+        end
+
+        for i, clone in ipairs(clones) do
+            if clone and clone.Parent then
+                clone.CFrame = root.CFrame * CFrame.new(0, 0, i * 2.5)
+                clone.Color = omega
+                    and Color3.fromHSV((hue + i * 0.08) % 1, 1, 1)
+                    or Color3.fromRGB(0, 170, 255)
+                clone.Transparency = 0.2 + i * 0.06
+            end
+        end
+    end
+end)
+
+player.CharacterAdded:Connect(function()
+    running = false
+    charging = false
+    frozen = false
+    dashUntil = 0
+    clearClones()
+
+    if highlight then
+        highlight:Destroy()
+        highlight = nil
+    end
+
+    task.wait(0.5)
+    updateSpeed()
+end)
