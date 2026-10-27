@@ -1,0 +1,243 @@
+
+-- S
+local busy = false
+local musicEnabled = false
+
+local MUSIC_ID = "rbxassetid://101598365847186"
+local CHARGE_ID = "rbxassetid://9069975578"
+local SHOT_ID = "rbxassetid://75022185812295"
+
+local music = Instance.new("Sound")
+music.Name = "BadTimeMusic"
+music.SoundId = MUSIC_ID
+music.Looped = true
+music.Volume = 0.6
+music.Parent = SoundService
+
+local function playSound(id, position)
+    local sound = Instance.new("Sound")
+    sound.SoundId = id
+    sound.Volume = 1
+    sound.Parent = SoundService
+    sound:Play()
+    Debris:AddItem(sound, 8)
+end
+
+local function makeFlash(position, color, maxSize)
+    local orb = Instance.new("Part")
+    orb.Name = "BADTIME_Flash"
+    orb.Shape = Enum.PartType.Ball
+    orb.Size = Vector3.new(1, 1, 1)
+    orb.Position = position
+    orb.Anchored = true
+    orb.CanCollide = false
+    orb.CanTouch = false
+    orb.Material = Enum.Material.Neon
+    orb.Color = color
+    orb.Transparency = 0.15
+    orb.Parent = workspace
+
+    TweenService:Create(
+        orb,
+        TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {
+            Size = Vector3.new(maxSize, maxSize, maxSize),
+            Transparency = 1
+        }
+    ):Play()
+
+    Debris:AddItem(orb, 0.4)
+end
+
+local function makeProjectile(startPos, endPos, color, size, speed)
+    local bone = Instance.new("Part")
+    bone.Name = "BADTIME_Bone"
+    bone.Size = size
+    bone.Material = Enum.Material.Neon
+    bone.Color = color
+    bone.Anchored = true
+    bone.CanCollide = false
+    bone.CanTouch = false
+    bone.CFrame = CFrame.lookAt(startPos, endPos)
+    bone.Parent = workspace
+
+    local distance = (endPos - startPos).Magnitude
+    local duration = math.clamp(distance / speed, 0.1, 2)
+
+    local tween = TweenService:Create(
+        bone,
+        TweenInfo.new(duration, Enum.EasingStyle.Linear),
+        {Position = endPos}
+    )
+    tween:Play()
+
+    task.delay(duration, function()
+        if bone.Parent then
+            makeFlash(endPos, color, 10)
+            bone:Destroy()
+        end
+    end)
+
+    Debris:AddItem(bone, 3)
+end
+
+local function makeLaser(origin, target, color, thickness)
+    local distance = (target - origin).Magnitude
+    if distance < 1 then return end
+
+    local laser = Instance.new("Part")
+    laser.Name = "BADTIME_Laser"
+    laser.Anchored = true
+    laser.CanCollide = false
+    laser.CanTouch = false
+    laser.Material = Enum.Material.Neon
+    laser.Color = color
+    laser.Size = Vector3.new(thickness, thickness, distance)
+    laser.CFrame = CFrame.lookAt((origin + target) / 2, target)
+    laser.Parent = workspace
+
+    makeFlash(origin, color, 7)
+    makeFlash(target, color, 15)
+
+    task.delay(0.25, function()
+        if laser.Parent then
+            TweenService:Create(
+                laser,
+                TweenInfo.new(0.2),
+                {Transparency = 1}
+            ):Play()
+            Debris:AddItem(laser, 0.25)
+        end
+    end)
+end
+
+local function flashDash()
+    if busy then return end
+    busy = true
+
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        busy = false
+        return
+    end
+
+    local startCFrame = root.CFrame
+    local startPos = root.Position
+    local targetPos = mouse.Hit.Position
+
+    if (targetPos - startPos).Magnitude > 200 then
+        busy = false
+        return
+    end
+
+    makeFlash(startPos, Color3.new(1, 1, 1), 18)
+
+    local original = {}
+    for _, obj in ipairs(character:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            original[obj] = obj.LocalTransparencyModifier
+            obj.LocalTransparencyModifier = 1
+        end
+    end
+
+    task.wait(0.12)
+    makeFlash(targetPos, Color3.fromRGB(0, 170, 255), 22)
+
+    local ghost = Instance.new("Part")
+    ghost.Name = "BADTIME_Afterimage"
+    ghost.Size = Vector3.new(2, 3, 1)
+    ghost.Anchored = true
+    ghost.CanCollide = false
+    ghost.Material = Enum.Material.Neon
+    ghost.Color = Color3.fromRGB(0, 170, 255)
+    ghost.Transparency = 0.2
+    ghost.CFrame = CFrame.new(targetPos + Vector3.new(0, 2, 0))
+    ghost.Parent = workspace
+
+    TweenService:Create(
+        ghost,
+        TweenInfo.new(0.25),
+        {Transparency = 1, Size = Vector3.new(6, 6, 6)}
+    ):Play()
+
+    Debris:AddItem(ghost, 0.3)
+    task.wait(0.2)
+
+    for part, value in pairs(original) do
+        if part.Parent then
+            part.LocalTransparencyModifier = value
+        end
+    end
+
+    makeFlash(startCFrame.Position, Color3.new(1, 1, 1), 15)
+    busy = false
+end
+
+local function activate(ability)
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local origin = root.Position + Vector3.new(0, 2, 0)
+    local target = mouse.Hit.Position
+    local offset = target - origin
+
+    if offset.Magnitude < 1 then return end
+    if offset.Magnitude > 250 then
+        target = origin + offset.Unit * 250
+    end
+
+    if ability == "Q" then
+        makeProjectile(origin, target, Color3.new(1,1,1),
+            Vector3.new(0.5, 3, 0.5), 100)
+
+    elseif ability == "Y" then
+        makeProjectile(origin, target, Color3.fromRGB(0,170,255),
+            Vector3.new(0.6, 3.5, 0.6), 130)
+
+    elseif ability == "U" then
+        makeProjectile(origin, target, Color3.fromRGB(255,220,0),
+            Vector3.new(0.6, 3.5, 0.6), 130)
+
+    elseif ability == "E" then
+        playSound(CHARGE_ID)
+        task.wait(0.5)
+        playSound(SHOT_ID)
+        makeLaser(origin, target, Color3.fromRGB(0,170,255), 3)
+
+    elseif ability == "T" then
+        playSound(CHARGE_ID)
+        task.wait(0.8)
+        playSound(SHOT_ID)
+        makeLaser(origin, target, Color3.fromRGB(255,255,255), 10)
+    end
+end
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        activate("Q")
+    elseif input.KeyCode == Enum.KeyCode.Y then
+        activate("Y")
+    elseif input.KeyCode == Enum.KeyCode.U then
+        activate("U")
+    elseif input.KeyCode == Enum.KeyCode.E then
+        activate("E")
+    elseif input.KeyCode == Enum.KeyCode.T then
+        activate("T")
+    elseif input.KeyCode == Enum.KeyCode.F then
+        flashDash()
+    elseif input.KeyCode == Enum.KeyCode.B then
+        musicEnabled = not musicEnabled
+        if musicEnabled then
+            music:Play()
+        else
+            music:Stop()
+        end
+    end
+end)
+
+print("SANS BAD TIME LOCAL VISUALS LOADED")
+print("Q Bone | Y Blue | U Yellow | E Blaster | T Big Blaster | F Flash | B Music")
