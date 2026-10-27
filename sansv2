@@ -1,0 +1,338 @@
+
+-- SANS BAD TIME | Single LocalScript
+-- Roblox Studio > StarterPlayer > StarterPlayerScripts
+-- Локальные визуальные эффекты, без урона.
+-- Настоящий флинг других игроков требует серверной части.
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+local BONE_ID = 1492930500
+local BLASTER_ID = 12654281872
+local CHARGE_ID = 9069975578
+local SHOT_ID = 75022185812295
+local MUSIC_ID = 101598365847186
+
+local cooldowns = {}
+local badTime = false
+local blueSoul = false
+local redSoul = false
+
+local abilities = {
+    Q = {name="Bone", power=100, color=Color3.fromRGB(245,245,255), cd=.7},
+    E = {name="Gaster Blaster", power=400, color=Color3.fromRGB(0,220,255), cd=2},
+    R = {name="Mini Blaster", power=50, color=Color3.fromRGB(0,220,255), cd=1},
+    T = {name="Big Blaster", power=1000, color=Color3.fromRGB(0,220,255), cd=4},
+    Y = {name="Blue Bone", power=300, color=Color3.fromRGB(0,100,255), cd=1},
+    U = {name="Yellow Bone", power=300, color=Color3.fromRGB(255,220,0), cd=1}
+}
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "SansBadTime"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local panel = Instance.new("ScrollingFrame")
+panel.Name = "Abilities"
+panel.Size = UDim2.fromOffset(235, 390)
+panel.Position = UDim2.new(0, 12, .22, 0)
+panel.BackgroundColor3 = Color3.fromRGB(12,12,25)
+panel.BorderSizePixel = 0
+panel.ScrollBarThickness = 5
+panel.CanvasSize = UDim2.new()
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0,10)
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0,5)
+layout.Parent = panel
+
+layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    panel.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y + 8)
+end)
+
+local function addButton(key, title, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1,-8,0,30)
+    button.BackgroundColor3 = Color3.fromRGB(35,35,60)
+    button.BorderSizePixel = 0
+    button.TextColor3 = Color3.new(1,1,1)
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 12
+    button.Text = key .. "  |  " .. title
+    button.Parent = panel
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0,6)
+    button.Activated:Connect(callback)
+end
+
+local function getCharacter()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if hum and root and hum.Health > 0 then
+        return char, hum, root
+    end
+end
+
+local function getAimPosition()
+    local camera = workspace.CurrentCamera
+    local ray = camera:ScreenPointToRay(mouse.X, mouse.Y)
+    local result = workspace:Raycast(ray.Origin, ray.Direction * 500)
+    return result and result.Position or (ray.Origin + ray.Direction * 100)
+end
+
+local function playSound(id, parent)
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. tostring(id)
+    sound.Volume = .8
+    sound.Parent = parent or SoundService
+    sound:Play()
+    Debris:AddItem(sound, 12)
+    return sound
+end
+
+local function createPart(name, size, cf, color, transparency, lifetime)
+    local part = Instance.new("Part")
+    part.Name = name
+    part.Size = size
+    part.CFrame = cf
+    part.Color = color
+    part.Transparency = transparency
+    part.Material = Enum.Material.Neon
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanTouch = false
+    part.CanQuery = false
+    part.Parent = workspace
+    Debris:AddItem(part, lifetime)
+    return part
+end
+
+-- Простая кость-прототип, если импортированная модель недоступна.
+local function makeBoneFallback(position, direction, color)
+    local model = Instance.new("Model")
+    model.Name = "SansBoneProjectile"
+
+    local shaft = Instance.new("Part")
+    shaft.Name = "BoneShaft"
+    shaft.Size = Vector3.new(.45,.45,3.4)
+    shaft.Color = color
+    shaft.Material = Enum.Material.Neon
+    shaft.Anchored = true
+    shaft.CanCollide = false
+    shaft.CanTouch = false
+    shaft.CanQuery = false
+    shaft.Parent = model
+
+    local a = Instance.new("Part")
+    a.Name = "BoneEndA"
+    a.Shape = Enum.PartType.Ball
+    a.Size = Vector3.new(.8,.8,.8)
+    a.Color = color
+    a.Material = Enum.Material.Neon
+    a.Anchored = true
+    a.CanCollide = false
+    a.CanTouch = false
+    a.CanQuery = false
+    a.Parent = model
+
+    local b = a:Clone()
+    b.Name = "BoneEndB"
+    b.Parent = model
+
+    local startCF = CFrame.lookAt(position, position + direction)
+    model.PrimaryPart = shaft
+    model:PivotTo(startCF)
+    a.CFrame = shaft.CFrame * CFrame.new(0,0,-1.45)
+    b.CFrame = shaft.CFrame * CFrame.new(0,0,1.45)
+    model.Parent = workspace
+    return model
+end
+
+local function moveBone(action, color)
+    local char, _, root = getCharacter()
+    if not char then return end
+
+    local aim = getAimPosition()
+    local origin = root.Position + Vector3.new(0,1.5,0)
+    local delta = aim - origin
+    if delta.Magnitude < 1 then return end
+    local direction = delta.Unit
+    local distance = math.clamp(delta.Magnitude, 5, 100)
+
+    local bone = makeBoneFallback(origin + direction * 3, direction, color)
+    local start = bone:GetPivot()
+    local finish = CFrame.lookAt(origin + direction * distance, origin + direction * (distance + 1))
+
+    -- Красный прозрачный визуальный хитбокс.
+    local hitbox = createPart(
+        "Sans_RedHitbox",
+        Vector3.new(2.5,2.5,4),
+        start,
+        Color3.fromRGB(255,0,0),
+        .65,
+        .5
+    )
+
+    local driver = Instance.new("CFrameValue")
+    driver.Value = start
+
+    local conn = driver:GetPropertyChangedSignal("Value"):Connect(function()
+        if bone.Parent then bone:PivotTo(driver.Value) end
+        if hitbox.Parent then hitbox.CFrame = driver.Value end
+    end)
+
+    local tween = TweenService:Create(
+        driver,
+        TweenInfo.new(distance / 100, Enum.EasingStyle.Linear),
+        {Value = finish}
+    )
+
+    tween:Play()
+    tween.Completed:Once(function()
+        conn:Disconnect()
+        driver:Destroy()
+        bone:Destroy()
+        if hitbox.Parent then hitbox:Destroy() end
+    end)
+end
+
+local function fireBlaster(action, power, color)
+    local char, _, root = getCharacter()
+    if not char then return end
+
+    local aim = getAimPosition()
+    local origin = root.Position + Vector3.new(0,3,0)
+    local direction = aim - origin
+    if direction.Magnitude < 1 then return end
+    direction = direction.Unit
+
+    -- Появление декоративного бластера перед выстрелом.
+    local size = action == "Big Blaster" and Vector3.new(7,7,7)
+        or action == "Mini Blaster" and Vector3.new(2,2,2)
+        or Vector3.new(4,4,4)
+
+    local spawnCF = CFrame.lookAt(origin + direction * 6, aim)
+    local blaster = createPart(
+        "Sans_" .. action,
+        size,
+        spawnCF,
+        color,
+        .15,
+        2
+    )
+
+    playSound(CHARGE_ID, blaster)
+
+    task.delay(.8, function()
+        if not blaster.Parent then return end
+        playSound(SHOT_ID, blaster)
+
+        local length = math.clamp((aim - blaster.Position).Magnitude, 5, 100)
+        local beamCF = CFrame.lookAt(
+            blaster.Position + direction * (length/2),
+            blaster.Position + direction * length
+        )
+
+        local beam = createPart(
+            "Sans_BlasterBeam",
+            Vector3.new(action == "Big Blaster" and 10 or 4, 4, length),
+            beamCF,
+            color,
+            .25,
+            .25
+        )
+
+        local hitbox = createPart(
+            "Sans_RedHitbox",
+            beam.Size,
+            beamCF,
+            Color3.fromRGB(255,0,0),
+            .65,
+            .25
+        )
+
+        Debris:AddItem(beam, .25)
+        Debris:AddItem(hitbox, .25)
+    end)
+end
+
+local function activate(key)
+    local data = abilities[key]
+    if data then
+        local now = os.clock()
+        local cd = badTime and .1 or data.cd
+        if key == "T" and badTime then cd = 1 end
+        if now - (cooldowns[key] or 0) < cd then return end
+        cooldowns[key] = now
+
+        if key == "Q" or key == "Y" or key == "U" then
+            moveBone(data.name, data.color)
+        else
+            fireBlaster(data.name, data.power, data.color)
+        end
+        return
+    end
+
+    local char, _, root = getCharacter()
+    if key == "F" and root then
+        local pos = getAimPosition()
+        if (pos - root.Position).Magnitude <= 100 then
+            root.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
+        end
+    elseif key == "G" then
+        blueSoul = not blueSoul
+        redSoul = false
+    elseif key == "H" then
+        redSoul = not redSoul
+        blueSoul = false
+    elseif key == "J" and root then
+        local direction = Vector3.new(math.random(-10,10),0,math.random(-10,10))
+        if direction.Magnitude < 1 then direction = Vector3.new(1,0,0) end
+        root.AssemblyLinearVelocity = direction.Unit * 45 + Vector3.new(0,18,0)
+    elseif key == "B" then
+        badTime = not badTime
+        local music = SoundService:FindFirstChild("SansBadTimeMusic")
+        if not music then
+            music = Instance.new("Sound")
+            music.Name = "SansBadTimeMusic"
+            music.SoundId = "rbxassetid://" .. MUSIC_ID
+            music.Volume = .6
+            music.Looped = true
+            music.Parent = SoundService
+        end
+        if badTime then music:Play() else music:Stop() end
+    end
+end
+
+for key, data in pairs(abilities) do
+    addButton(key, data.name .. " | power " .. data.power, function()
+        activate(key)
+    end)
+end
+
+addButton("F", "Teleport", function() activate("F") end)
+addButton("G", "Blue Soul", function() activate("G") end)
+addButton("H", "Red Soul", function() activate("H") end)
+addButton("J", "Dodge", function() activate("J") end)
+addButton("B", "BAD TIME", function() activate("B") end)
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    activate(input.KeyCode.Name)
+end)
+
+-- Чтобы не оставлять старую музыку при уничтожении GUI.
+gui.Destroying:Connect(function()
+    local music = SoundService:FindFirstChild("SansBadTimeMusic")
+    if music then music:Stop() end
+end)
