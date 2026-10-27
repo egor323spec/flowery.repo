@@ -1,0 +1,712 @@
+
+--========================================================
+-- SANS BAD TIME V3 — EXPANDED LOCAL VISUALS
+-- Place: StarterPlayer > StarterPlayerScripts
+--
+-- Q: Bone
+-- Y: Blue Bone
+-- U: Yellow Bone
+-- E: Gaster Blaster
+-- T: Big Gaster Blaster
+-- F: Flash Dash visual
+-- B: Music
+--========================================================
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
+
+local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
+
+local CONFIG = {
+    MaxRange = 250,
+    BoneSpeed = 120,
+    BlueBoneSpeed = 150,
+    YellowBoneSpeed = 150,
+    BoneLifetime = 3,
+    FlashLifetime = 0.4,
+    DashRange = 200,
+    DashDuration = 0.35,
+    MusicVolume = 0.6,
+    ChargeDuration = 0.6,
+    LaserDuration = 0.3,
+}
+
+local COLORS = {
+    Bone = Color3.fromRGB(245, 245, 255),
+    Blue = Color3.fromRGB(0, 170, 255),
+    Yellow = Color3.fromRGB(255, 220, 0),
+    Red = Color3.fromRGB(255, 40, 40),
+    White = Color3.fromRGB(255, 255, 255),
+    Green = Color3.fromRGB(0, 255, 120),
+}
+
+local SOUNDS = {
+    Music = "rbxassetid://101598365847186",
+    Charge = "rbxassetid://9069975578",
+    Shot = "rbxassetid://75022185812295",
+}
+
+local COOLDOWNS = {
+    Q = 0.7,
+    Y = 1.5,
+    U = 1.5,
+    E = 3,
+    T = 7,
+    F = 2,
+}
+
+local lastUse = {}
+local busy = false
+local musicEnabled = false
+local activeEffects = {}
+
+--========================================================
+-- SOUND SETUP
+--========================================================
+
+local Music = Instance.new("Sound")
+Music.Name = "SansBadTimeMusic"
+Music.SoundId = SOUNDS.Music
+Music.Volume = CONFIG.MusicVolume
+Music.Looped = true
+Music.Parent = SoundService
+
+local function playSound(soundId, volume, playbackSpeed)
+    local sound = Instance.new("Sound")
+    sound.SoundId = soundId
+    sound.Volume = volume or 1
+    sound.PlaybackSpeed = playbackSpeed or 1
+    sound.Parent = SoundService
+    sound:Play()
+
+    Debris:AddItem(sound, 10)
+    return sound
+end
+
+--========================================================
+-- CHARACTER HELPERS
+--========================================================
+
+local function getCharacter()
+    local character = Player.Character
+    if not character then
+        return nil, nil, nil
+    end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local root = character:FindFirstChild("HumanoidRootPart")
+
+    if not humanoid or not root or humanoid.Health <= 0 then
+        return nil, nil, nil
+    end
+
+    return character, humanoid, root
+end
+
+local function getOrigin()
+    local _, _, root = getCharacter()
+    if not root then
+        return nil
+    end
+
+    return root.Position + Vector3.new(0, 2, 0)
+end
+
+local function getTarget(origin)
+    if not origin then
+        return nil
+    end
+
+    local target = Mouse.Hit.Position
+    local offset = target - origin
+
+    if offset.Magnitude > CONFIG.MaxRange then
+        target = origin + offset.Unit * CONFIG.MaxRange
+    end
+
+    return target
+end
+
+local function ready(key)
+    local now = os.clock()
+    local previous = lastUse[key] or 0
+
+    if now - previous < (COOLDOWNS[key] or 1) then
+        return false
+    end
+
+    lastUse[key] = now
+    return true
+end
+
+--========================================================
+-- GUI
+--========================================================
+
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "SansBadTimeGUI"
+Gui.ResetOnSpawn = false
+Gui.Parent = Player:WaitForChild("PlayerGui")
+
+local Panel = Instance.new("Frame")
+Panel.Name = "AbilityPanel"
+Panel.Size = UDim2.fromOffset(220, 240)
+Panel.Position = UDim2.new(0, 16, 0.5, -120)
+Panel.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+Panel.BackgroundTransparency = 0.15
+Panel.BorderSizePixel = 0
+Panel.Parent = Gui
+
+local PanelCorner = Instance.new("UICorner")
+PanelCorner.CornerRadius = UDim.new(0, 10)
+PanelCorner.Parent = Panel
+
+local PanelStroke = Instance.new("UIStroke")
+PanelStroke.Color = COLORS.Blue
+PanelStroke.Thickness = 2
+PanelStroke.Parent = Panel
+
+local Header = Instance.new("TextLabel")
+Header.Size = UDim2.new(1, -12, 0, 34)
+Header.Position = UDim2.fromOffset(6, 4)
+Header.BackgroundTransparency = 1
+Header.Text = "SANS BAD TIME"
+Header.TextColor3 = COLORS.White
+Header.Font = Enum.Font.GothamBold
+Header.TextSize = 18
+Header.Parent = Panel
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -12, 0, 24)
+Status.Position = UDim2.fromOffset(6, 36)
+Status.BackgroundTransparency = 1
+Status.Text = "STATUS: READY"
+Status.TextColor3 = COLORS.Green
+Status.Font = Enum.Font.Gotham
+Status.TextSize = 12
+Status.Parent = Panel
+
+local abilityNames = {
+    {"Q", "Bone"},
+    {"Y", "Blue Bone"},
+    {"U", "Yellow Bone"},
+    {"E", "Gaster Blaster"},
+    {"T", "Big Blaster"},
+    {"F", "Flash Dash"},
+    {"B", "Music Toggle"},
+}
+
+local function updateStatus(text, color)
+    Status.Text = "STATUS: " .. text
+    Status.TextColor3 = color or COLORS.Green
+end
+
+for index, item in ipairs(abilityNames) do
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -16, 0, 22)
+    label.Position = UDim2.fromOffset(8, 62 + (index - 1) * 24)
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = item[1] .. "  -  " .. item[2]
+    label.TextColor3 = COLORS.White
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.Parent = Panel
+end
+
+--========================================================
+-- EFFECT CREATION
+--========================================================
+
+local function trackEffect(instance)
+    table.insert(activeEffects, instance)
+    return instance
+end
+
+local function flash(position, color, finalSize, duration)
+    local orb = Instance.new("Part")
+    orb.Name = "SansFlash"
+    orb.Shape = Enum.PartType.Ball
+    orb.Size = Vector3.new(1, 1, 1)
+    orb.Position = position
+    orb.Anchored = true
+    orb.CanCollide = false
+    orb.CanTouch = false
+    orb.CanQuery = false
+    orb.Material = Enum.Material.Neon
+    orb.Color = color
+    orb.Transparency = 0.05
+    orb.Parent = workspace
+
+    trackEffect(orb)
+
+    local tween = TweenService:Create(
+        orb,
+        TweenInfo.new(
+            duration or CONFIG.FlashLifetime,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        ),
+        {
+            Size = Vector3.new(finalSize, finalSize, finalSize),
+            Transparency = 1,
+        }
+    )
+
+    tween:Play()
+    Debris:AddItem(orb, (duration or CONFIG.FlashLifetime) + 0.1)
+    return orb
+end
+
+local function ring(position, color, radius)
+    local part = Instance.new("Part")
+    part.Name = "SansShockRing"
+    part.Shape = Enum.PartType.Cylinder
+    part.Size = Vector3.new(0.15, 1, 1)
+    part.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanTouch = false
+    part.Material = Enum.Material.Neon
+    part.Color = color
+    part.Transparency = 0.15
+    part.Parent = workspace
+
+    TweenService:Create(
+        part,
+        TweenInfo.new(0.35, Enum.EasingStyle.Quad),
+        {
+            Size = Vector3.new(0.15, radius, radius),
+            Transparency = 1,
+        }
+    ):Play()
+
+    Debris:AddItem(part, 0.45)
+    return part
+end
+
+local function afterimage(position, color, scale)
+    local ghost = Instance.new("Part")
+    ghost.Name = "SansAfterimage"
+    ghost.Size = Vector3.new(2, 3, 1) * (scale or 1)
+    ghost.CFrame = CFrame.new(position)
+    ghost.Anchored = true
+    ghost.CanCollide = false
+    ghost.CanTouch = false
+    ghost.Material = Enum.Material.Neon
+    ghost.Color = color
+    ghost.Transparency = 0.25
+    ghost.Parent = workspace
+
+    TweenService:Create(
+        ghost,
+        TweenInfo.new(0.3, Enum.EasingStyle.Quad),
+        {
+            Transparency = 1,
+            Size = ghost.Size * 1.8,
+        }
+    ):Play()
+
+    Debris:AddItem(ghost, 0.4)
+end
+
+local function trailBetween(startPos, endPos, color, thickness)
+    local offset = endPos - startPos
+    local distance = offset.Magnitude
+    if distance < 0.1 then
+        return
+    end
+
+    local part = Instance.new("Part")
+    part.Name = "SansTrail"
+    part.Size = Vector3.new(thickness, thickness, distance)
+    part.CFrame = CFrame.lookAt((startPos + endPos) / 2, endPos)
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanTouch = false
+    part.Material = Enum.Material.Neon
+    part.Color = color
+    part.Transparency = 0.2
+    part.Parent = workspace
+
+    TweenService:Create(
+        part,
+        TweenInfo.new(0.25),
+        {Transparency = 1}
+    ):Play()
+
+    Debris:AddItem(part, 0.3)
+end
+
+--========================================================
+-- PROJECTILE SYSTEM
+--========================================================
+
+local function projectile(origin, target, color, size, speed, spin)
+    local offset = target - origin
+    if offset.Magnitude < 1 then
+        return
+    end
+
+    local direction = offset.Unit
+    local distance = offset.Magnitude
+    local duration = math.clamp(distance / speed, 0.1, 2)
+
+    local projectilePart = Instance.new("Part")
+    projectilePart.Name = "SansBoneProjectile"
+    projectilePart.Size = size
+    projectilePart.CFrame = CFrame.lookAt(origin, target)
+    projectilePart.Anchored = true
+    projectilePart.CanCollide = false
+    projectilePart.CanTouch = false
+    projectilePart.CanQuery = false
+    projectilePart.Material = Enum.Material.Neon
+    projectilePart.Color = color
+    projectilePart.Parent = workspace
+
+    local light = Instance.new("PointLight")
+    light.Color = color
+    light.Brightness = 2
+    light.Range = 8
+    light.Parent = projectilePart
+
+    local mesh = Instance.new("SpecialMesh")
+    mesh.MeshType = Enum.MeshType.Sphere
+    mesh.Scale = Vector3.new(0.35, 1.8, 0.35)
+    mesh.Parent = projectilePart
+
+    local startTime = os.clock()
+    local connection
+
+    connection = RunService.RenderStepped:Connect(function()
+        if not projectilePart.Parent then
+            connection:Disconnect()
+            return
+        end
+
+        local alpha = math.clamp(
+            (os.clock() - startTime) / duration,
+            0,
+            1
+        )
+
+        local position = origin:Lerp(target, alpha)
+        projectilePart.CFrame =
+            CFrame.lookAt(position, position + direction)
+            * CFrame.Angles(0, 0, spin * alpha * math.pi * 4)
+
+        if alpha >= 1 then
+            connection:Disconnect()
+            flash(target, color, 12, 0.3)
+            ring(target, color, 9)
+            afterimage(target, color, 0.7)
+            projectilePart:Destroy()
+        end
+    end)
+
+    Debris:AddItem(projectilePart, CONFIG.BoneLifetime)
+end
+
+--========================================================
+-- GASTER BLASTER VISUALS
+--========================================================
+
+local function makeBlasterVisual(origin, target, color, big)
+    local direction = target - origin
+    if direction.Magnitude < 1 then
+        return
+    end
+
+    local unit = direction.Unit
+    local spawnPos = origin + unit * 7 + Vector3.new(0, 3, 0)
+
+    local head = Instance.new("Part")
+    head.Name = big and "BigGasterBlaster" or "GasterBlaster"
+    head.Shape = Enum.PartType.Ball
+    head.Size = big and Vector3.new(7, 7, 7) or Vector3.new(4, 4, 4)
+    head.CFrame = CFrame.lookAt(spawnPos, target)
+    head.Anchored = true
+    head.CanCollide = false
+    head.CanTouch = false
+    head.Material = Enum.Material.Neon
+    head.Color = color
+    head.Parent = workspace
+
+    local eye = Instance.new("Part")
+    eye.Name = "BlasterEye"
+    eye.Shape = Enum.PartType.Ball
+    eye.Size = big and Vector3.new(2, 2, 2) or Vector3.new(1.2, 1.2, 1.2)
+    eye.CFrame = head.CFrame * CFrame.new(0, 0, -head.Size.Z / 2)
+    eye.Anchored = true
+    eye.CanCollide = false
+    eye.CanTouch = false
+    eye.Material = Enum.Material.Neon
+    eye.Color = COLORS.White
+    eye.Parent = workspace
+
+    flash(spawnPos, color, big and 18 or 10, 0.4)
+    playSound(SOUNDS.Charge, 0.8, big and 0.8 or 1)
+
+    task.wait(big and 1 or CONFIG.ChargeDuration)
+
+    if not head.Parent then
+        return
+    end
+
+    playSound(SOUNDS.Shot, 1, 1)
+    flash(spawnPos, COLORS.White, big and 24 or 14, 0.25)
+
+    local length = math.min(direction.Magnitude, CONFIG.MaxRange)
+    local endpoint = spawnPos + unit * length
+    local beamSize = big and 12 or 4
+
+    local beam = Instance.new("Part")
+    beam.Name = "GasterBeam"
+    beam.Size = Vector3.new(beamSize, beamSize, length)
+    beam.CFrame = CFrame.lookAt((spawnPos + endpoint) / 2, endpoint)
+    beam.Anchored = true
+    beam.CanCollide = false
+    beam.CanTouch = false
+    beam.CanQuery = false
+    beam.Material = Enum.Material.Neon
+    beam.Color = color
+    beam.Transparency = 0.1
+    beam.Parent = workspace
+
+    flash(endpoint, color, big and 28 or 16, 0.3)
+    ring(endpoint, color, big and 24 or 14)
+
+    TweenService:Create(
+        beam,
+        TweenInfo.new(CONFIG.LaserDuration),
+        {
+            Transparency = 1,
+            Size = Vector3.new(0.1, 0.1, length),
+        }
+    ):Play()
+
+    Debris:AddItem(beam, 0.4)
+    Debris:AddItem(head, 0.6)
+    Debris:AddItem(eye, 0.6)
+end
+
+--========================================================
+-- FLASH DASH VISUAL
+--========================================================
+
+local function flashDash()
+    if busy or not ready("F") then
+        return
+    end
+
+    local character, humanoid, root = getCharacter()
+    if not character then
+        return
+    end
+
+    busy = true
+    updateStatus("FLASH DASH", COLORS.Blue)
+
+    local startCFrame = root.CFrame
+    local startPos = root.Position
+    local target = getTarget(startPos)
+
+    if not target or (target - startPos).Magnitude > CONFIG.DashRange then
+        busy = false
+        updateStatus("READY")
+        return
+    end
+
+    flash(startPos, COLORS.White, 22, 0.2)
+    ring(startPos, COLORS.Blue, 12)
+    playSound(SOUNDS.Charge, 0.6, 1.2)
+
+    local savedTransparency = {}
+
+    for _, obj in ipairs(character:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            savedTransparency[obj] = obj.LocalTransparencyModifier
+            obj.LocalTransparencyModifier = 1
+        end
+    end
+
+    task.wait(0.12)
+
+    afterimage(target + Vector3.new(0, 2, 0), COLORS.Blue, 1.3)
+    flash(target, COLORS.White, 25, 0.2)
+    ring(target, COLORS.Blue, 20)
+
+    trailBetween(startPos, target, COLORS.Blue, 0.7)
+
+    task.wait(CONFIG.DashDuration)
+
+    for part, oldValue in pairs(savedTransparency) do
+        if part.Parent then
+            part.LocalTransparencyModifier = oldValue
+        end
+    end
+
+    flash(startCFrame.Position, COLORS.White, 16, 0.2)
+    ring(startCFrame.Position, COLORS.Blue, 10)
+
+    busy = false
+    updateStatus("READY")
+end
+
+--========================================================
+-- ABILITY ROUTER
+--========================================================
+
+local function activate(key)
+    if not ready(key) then
+        updateStatus("COOLDOWN", COLORS.Yellow)
+        task.delay(0.5, function()
+            updateStatus("READY")
+        end)
+        return
+    end
+
+    local origin = getOrigin()
+    if not origin then
+        return
+    end
+
+    local target = getTarget(origin)
+    if not target then
+        return
+    end
+
+    if key == "Q" then
+        updateStatus("BONE")
+        projectile(
+            origin,
+            target,
+            COLORS.Bone,
+            Vector3.new(0.7, 3.5, 0.7),
+            CONFIG.BoneSpeed,
+            1
+        )
+
+    elseif key == "Y" then
+        updateStatus("BLUE BONE", COLORS.Blue)
+        projectile(
+            origin,
+            target,
+            COLORS.Blue,
+            Vector3.new(0.8, 4, 0.8),
+            CONFIG.BlueBoneSpeed,
+            2
+        )
+
+    elseif key == "U" then
+        updateStatus("YELLOW BONE", COLORS.Yellow)
+        projectile(
+            origin,
+            target,
+            COLORS.Yellow,
+            Vector3.new(0.8, 4, 0.8),
+            CONFIG.YellowBoneSpeed,
+            -2
+        )
+
+    elseif key == "E" then
+        updateStatus("GASTER BLASTER", COLORS.Blue)
+        makeBlasterVisual(origin, target, COLORS.Blue, false)
+
+    elseif key == "T" then
+        updateStatus("BIG BLASTER", COLORS.Red)
+        makeBlasterVisual(origin, target, COLORS.White, true)
+    end
+
+    task.delay(0.6, function()
+        if not busy then
+            updateStatus("READY")
+        end
+    end)
+end
+
+--========================================================
+-- MUSIC
+--========================================================
+
+local function toggleMusic()
+    musicEnabled = not musicEnabled
+
+    if musicEnabled then
+        Music:Play()
+        updateStatus("MUSIC ON", COLORS.Green)
+    else
+        Music:Stop()
+        updateStatus("MUSIC OFF", COLORS.Red)
+    end
+
+    task.delay(0.6, function()
+        updateStatus("READY")
+    end)
+end
+
+--========================================================
+-- INPUT
+--========================================================
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then
+        return
+    end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        activate("Q")
+    elseif input.KeyCode == Enum.KeyCode.Y then
+        activate("Y")
+    elseif input.KeyCode == Enum.KeyCode.U then
+        activate("U")
+    elseif input.KeyCode == Enum.KeyCode.E then
+        activate("E")
+    elseif input.KeyCode == Enum.KeyCode.T then
+        activate("T")
+    elseif input.KeyCode == Enum.KeyCode.F then
+        flashDash()
+    elseif input.KeyCode == Enum.KeyCode.B then
+        toggleMusic()
+    end
+end)
+
+--========================================================
+-- CHARACTER RESPAWN
+--========================================================
+
+Player.CharacterAdded:Connect(function()
+    busy = false
+    task.wait(1)
+    updateStatus("READY")
+end)
+
+--========================================================
+-- CLEANUP
+--========================================================
+
+script.Destroying:Connect(function()
+    Music:Stop()
+
+    for _, effect in ipairs(activeEffects) do
+        if effect and effect.Parent then
+            effect:Destroy()
+        end
+    end
+end)
+
+print("====================================")
+print(" SANS BAD TIME V3 — LOADED")
+print(" Q: Bone")
+print(" Y: Blue Bone")
+print(" U: Yellow Bone")
+print(" E: Gaster Blaster")
+print(" T: Big Gaster Blaster")
+print(" F: Flash Dash Visual")
+print(" B: Music")
+print("====================================")
