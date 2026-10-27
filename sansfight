@@ -1,0 +1,194 @@
+
+-- SANS BAD TIME - Single LocalScript
+-- Place in StarterPlayer > StarterPlayerScripts
+-- Visual prototype; no damage.
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+local abilities = {
+    Q = {"Bones", 100, Color3.fromRGB(240,240,255)},
+    E = {"Gaster Blaster", 400, Color3.fromRGB(0,220,255)},
+    R = {"Mini Blaster", 50, Color3.fromRGB(0,220,255)},
+    T = {"Big Blaster", 1000, Color3.fromRGB(0,220,255)},
+    Y = {"Blue Bone", 300, Color3.fromRGB(0,100,255)},
+    U = {"Yellow Bone", 300, Color3.fromRGB(255,220,0)}
+}
+
+local cooldown = {}
+local badTime = false
+local blueSoul = false
+local redSoul = false
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "SansBadTime"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(220, 370)
+frame.Position = UDim2.new(0, 12, 0.25, 0)
+frame.BackgroundColor3 = Color3.fromRGB(15, 15, 28)
+frame.Parent = gui
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 4)
+list.Parent = frame
+
+local function getCharacter()
+    local c = player.Character
+    if not c then return end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if h and r and h.Health > 0 then return c, h, r end
+end
+
+local function aimPosition()
+    local camera = workspace.CurrentCamera
+    local ray = camera:ScreenPointToRay(mouse.X, mouse.Y)
+    local result = workspace:Raycast(ray.Origin, ray.Direction * 300)
+    return result and result.Position or ray.Origin + ray.Direction * 100
+end
+
+local function effect(action, power, color)
+    local _, _, root = getCharacter()
+    if not root then return end
+
+    local now = os.clock()
+    local cd = badTime and 0.1 or 0.7
+    if action == "Big Blaster" then cd = badTime and 1 or 4 end
+    if now - (cooldown[action] or 0) < cd then return end
+    cooldown[action] = now
+
+    local target = aimPosition()
+    local delta = target - root.Position
+    if delta.Magnitude < 1 then return end
+
+    local dir = delta.Unit
+    local length = math.clamp(delta.Magnitude, 5, 100)
+    local size = Vector3.new(3, 3, 5)
+
+    if action == "Gaster Blaster" then
+        size = Vector3.new(5, 5, length)
+    elseif action == "Mini Blaster" then
+        size = Vector3.new(2, 2, length)
+    elseif action == "Big Blaster" then
+        size = Vector3.new(12, 12, length)
+    end
+
+    local cf = CFrame.lookAt(
+        root.Position + Vector3.new(0, 1.5, 0) + dir * (length / 2),
+        root.Position + Vector3.new(0, 1.5, 0) + dir * length
+    )
+
+    local hitbox = Instance.new("Part")
+    hitbox.Name = "Sans_Red_Hitbox"
+    hitbox.Anchored = true
+    hitbox.CanCollide = false
+    hitbox.CanTouch = false
+    hitbox.CanQuery = false
+    hitbox.Material = Enum.Material.Neon
+    hitbox.Color = Color3.fromRGB(255, 0, 0)
+    hitbox.Transparency = 0.55
+    hitbox.Size = size
+    hitbox.CFrame = cf
+    hitbox.Parent = workspace
+    Debris:AddItem(hitbox, 0.2)
+
+    local visual = Instance.new("Part")
+    visual.Name = "Sans_" .. action
+    visual.Anchored = true
+    visual.CanCollide = false
+    visual.CanTouch = false
+    visual.CanQuery = false
+    visual.Material = Enum.Material.Neon
+    visual.Color = color
+    visual.Transparency = 0.3
+    visual.Size = size
+    visual.CFrame = cf
+    visual.Parent = workspace
+    Debris:AddItem(visual, 0.15)
+
+    -- Power is the intended knockback setting.
+    -- This LocalScript does not apply server-authoritative fling to other players.
+end
+
+local function teleport()
+    local _, _, root = getCharacter()
+    if not root then return end
+    local pos = aimPosition()
+    if (pos - root.Position).Magnitude <= 100 then
+        root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+    end
+end
+
+local function dodge()
+    local _, _, root = getCharacter()
+    if not root then return end
+    local dir = Vector3.new(math.random(-10,10), 0, math.random(-10,10))
+    if dir.Magnitude < 1 then dir = Vector3.new(1,0,0) end
+    root.AssemblyLinearVelocity = dir.Unit * 45 + Vector3.new(0,18,0)
+end
+
+local function activate(key)
+    if abilities[key] then
+        local data = abilities[key]
+        effect(data[1], data[2], data[3])
+    elseif key == "F" then
+        teleport()
+    elseif key == "J" then
+        dodge()
+    elseif key == "G" then
+        blueSoul = not blueSoul
+        redSoul = false
+    elseif key == "H" then
+        redSoul = not redSoul
+        blueSoul = false
+    elseif key == "B" then
+        badTime = not badTime
+        local music = SoundService:FindFirstChild("SansMusic")
+        if not music then
+            music = Instance.new("Sound")
+            music.Name = "SansMusic"
+            music.SoundId = "rbxassetid://101598365847186"
+            music.Looped = true
+            music.Volume = 0.65
+            music.Parent = SoundService
+        end
+        if badTime then music:Play() else music:Stop() end
+    end
+end
+
+local function addButton(key, title)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -8, 0, 29)
+    b.Position = UDim2.new(0, 4, 0, 0)
+    b.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextSize = 13
+    b.Font = Enum.Font.GothamBold
+    b.Text = key .. " - " .. title
+    b.Parent = frame
+    b.Activated:Connect(function() activate(key) end)
+end
+
+for key, data in pairs(abilities) do
+    addButton(key, data[1] .. " | Fling " .. data[2])
+end
+
+addButton("F", "Teleport")
+addButton("G", "Blue Soul")
+addButton("H", "Red Soul")
+addButton("J", "Dodge")
+addButton("B", "BAD TIME")
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    activate(input.KeyCode.Name)
+end)
