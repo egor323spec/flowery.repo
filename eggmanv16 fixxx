@@ -1,0 +1,667 @@
+
+-- EGGMAN V16 R6 FIX
+-- LocalScript in StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local ContentProvider = game:GetService("ContentProvider")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local WALK_SPEED = 6
+local RUN_SPEED = 25
+local DASH_SPEED = 75
+local DASH_TIME = 3
+local SHIELD_TIME = 5
+
+local IDS = {
+    Shield = "121620484878674",
+    Retract = "101024228616428",
+    Strike = "107417919520477",
+    DoubleJump = "94415781170273",
+    Jetpack = "126742809369490",
+    CrackedEmpire = "87493231115640",
+}
+
+local ANIMS = {
+    Idle = "126850823844164",
+    Walk = "90633769714545",
+    Run = "139037627723405",
+    Jump = "75242449879123",
+    Fall = "140113712768097",
+    Dash = "76911383572824",
+}
+
+local character, humanoid, root, animator
+local tracks = {}
+local running = false
+local dashActive = false
+local shieldActive = false
+local shieldToken = 0
+local shield, shieldWeld
+local music, musicName
+local heldKeys = {}
+local characterConnections = {}
+local dashConnection
+local jumpCount = 0
+local canDoubleJump = true
+
+local function stopTrack(name)
+    local track = tracks[name]
+    if track then
+        pcall(function() track:Stop(0.15) end)
+    end
+end
+
+local function stopMovementTracks()
+    stopTrack("Idle")
+    stopTrack("Walk")
+    stopTrack("Run")
+end
+
+local function playTrack(name, looped)
+    local track = tracks[name]
+    if not track then return end
+    track.Looped = looped == true
+    if not track.IsPlaying then track:Play(0.15) end
+end
+
+local function loadAnimations()
+    for _, track in pairs(tracks) do
+        pcall(function() track:Stop() end)
+        pcall(function() track:Destroy() end)
+    end
+    tracks = {}
+
+    for name, id in pairs(ANIMS) do
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. id
+
+        local ok, track = pcall(function()
+            return animator:LoadAnimation(anim)
+        end)
+
+        if ok and track then
+            tracks[name] = track
+            track.Priority =
+                (name == "Idle" or name == "Walk" or name == "Run")
+                and Enum.AnimationPriority.Movement
+                or Enum.AnimationPriority.Action
+        else
+            warn("Animation failed:", name, id, track)
+        end
+        anim:Destroy()
+    end
+end
+
+local function playSound(id, parent, volume)
+    if not parent or not parent.Parent then return end
+
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = volume or 1
+    sound.Parent = parent
+    sound:Play()
+    Debris:AddItem(sound, 20)
+    return sound
+end
+
+local function setRunning(value)
+    running = value
+    if humanoid then
+        humanoid.WalkSpeed = value and RUN_SPEED or WALK_SPEED
+    end
+end
+
+-- DOUBLE-JUMP SMOKE
+local function doubleJumpSmoke()
+    if not root then return end
+
+    local attachment = Instance.new("Attachment")
+    attachment.Position = Vector3.new(0, -2, 0)
+    attachment.Parent = root
+
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    emitter.Rate = 0
+    emitter.Lifetime = NumberRange.new(0.35, 0.7)
+    emitter.Speed = NumberRange.new(5, 10)
+    emitter.SpreadAngle = Vector2.new(180, 180)
+    emitter.Drag = 3
+    emitter.LightInfluence = 0
+    emitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1.2),
+        NumberSequenceKeypoint.new(1, 3.2),
+    })
+    emitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.2),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    emitter.Parent = attachment
+    emitter:Emit(24)
+
+    Debris:AddItem(attachment, 2)
+end
+
+-- SHIELD
+local function destroyShield()
+    if shieldWeld then
+        shieldWeld:Destroy()
+        shieldWeld = nil
+    end
+    if shield then
+        shield:Destroy()
+        shield = nil
+    end
+end
+
+local function activateShield()
+    if shieldActive or not root or not character then return end
+
+    shieldActive = true
+    shieldToken += 1
+    local token = shieldToken
+
+    playSound(IDS.Shield, root)
+
+    local ball = Instance.new("Part")
+    ball.Name = "EggmanShield"
+    ball.Shape = Enum.PartType.Ball
+    ball.Size = Vector3.new(0.2, 0.2, 0.2)
+    ball.Material = Enum.Material.ForceField
+    ball.Color = Color3.fromRGB(100, 190, 255)
+    ball.Transparency = 1
+    ball.CanCollide = false
+    ball.CanTouch = false
+    ball.CanQuery = false
+    ball.Massless = true
+    ball.CFrame = root.CFrame
+    ball.Parent = character
+
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = root
+    weld.Part1 = ball
+    weld.Parent = ball
+
+    shield = ball
+    shieldWeld = weld
+
+    -- Shield extends from Eggman's body.
+    TweenService:Create(
+        ball,
+        TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        {
+            Size = Vector3.new(11, 11, 11),
+            Transparency = 0.4,
+        }
+    ):Play()
+
+    task.delay(SHIELD_TIME, function()
+        if token ~= shieldToken or not shieldActive then return end
+
+        shieldActive = false
+
+        if root and root.Parent then
+            playSound(IDS.Retract, root)
+        end
+
+        local currentShield = shield
+        if currentShield and currentShield.Parent then
+            local tween = TweenService:Create(
+                currentShield,
+                TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                {
+                    Size = Vector3.new(0.2, 0.2, 0.2),
+                    Transparency = 1,
+                }
+            )
+            tween:Play()
+            tween.Completed:Wait()
+        end
+
+        if token == shieldToken then
+            destroyShield()
+        end
+    end)
+end
+
+-- SHIELD STRIKE: ONLY ON BUTTON PRESS
+local function createRing(position, diameter, duration, transparency)
+    local ring = Instance.new("Part")
+    ring.Name = "EggmanStrikeRing"
+    ring.Shape = Enum.PartType.Cylinder
+    ring.Size = Vector3.new(0.18, 1, 1)
+    ring.Material = Enum.Material.Neon
+    ring.Color = Color3.fromRGB(40, 145, 255)
+    ring.Transparency = transparency or 0.15
+    ring.Anchored = true
+    ring.CanCollide = false
+    ring.CanTouch = false
+    ring.CanQuery = false
+
+    -- Cylinder's axis is rotated horizontally.
+    ring.CFrame = CFrame.new(position)
+        * CFrame.Angles(0, 0, math.rad(90))
+    ring.Parent = workspace
+
+    TweenService:Create(
+        ring,
+        TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {
+            Size = Vector3.new(0.18, diameter, diameter),
+            Transparency = 1,
+        }
+    ):Play()
+
+    Debris:AddItem(ring, duration + 0.1)
+end
+
+local function shieldStrike()
+    if not shieldActive or not root then return end
+
+    shieldActive = false
+    shieldToken += 1
+
+    playSound(IDS.Strike, root)
+
+    local position = root.Position
+    destroyShield()
+
+    -- Rings appear only when SHIELD STRIKE is pressed.
+    createRing(position, 20, 0.4, 0.1)
+    task.delay(0.08, function()
+        createRing(position, 30, 0.5, 0.2)
+    end)
+    task.delay(0.16, function()
+        createRing(position, 40, 0.6, 0.3)
+    end)
+
+    local wave = Instance.new("Part")
+    wave.Name = "EggmanShockwave"
+    wave.Shape = Enum.PartType.Ball
+    wave.Anchored = true
+    wave.CanCollide = false
+    wave.CanTouch = false
+    wave.CanQuery = false
+    wave.Material = Enum.Material.Neon
+    wave.Color = Color3.fromRGB(40, 145, 255)
+    wave.Transparency = 0.25
+    wave.Size = Vector3.new(1, 1, 1)
+    wave.CFrame = CFrame.new(position)
+    wave.Parent = workspace
+
+    TweenService:Create(
+        wave,
+        TweenInfo.new(0.45),
+        {
+            Size = Vector3.new(18, 18, 18),
+            Transparency = 1,
+        }
+    ):Play()
+
+    Debris:AddItem(wave, 0.55)
+end
+
+-- DASH PARTICLES
+local function createDashParticles()
+    local attachment = Instance.new("Attachment")
+    attachment.Position = Vector3.new(0, 0, 2)
+    attachment.Parent = root
+
+    local particles = Instance.new("ParticleEmitter")
+    particles.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    particles.Rate = 55
+    particles.Lifetime = NumberRange.new(0.4, 0.8)
+    particles.Speed = NumberRange.new(5, 12)
+    particles.SpreadAngle = Vector2.new(35, 35)
+    particles.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1.5),
+        NumberSequenceKeypoint.new(1, 4),
+    })
+    particles.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.2),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    particles.Parent = attachment
+    return attachment
+end
+
+local function dashDirection()
+    local camera = workspace.CurrentCamera
+    if not camera then return Vector3.new(0, 0, -1) end
+
+    local look = camera.CFrame.LookVector
+    local right = camera.CFrame.RightVector
+    local forward = Vector3.new(look.X, 0, look.Z)
+    local sideways = Vector3.new(right.X, 0, right.Z)
+
+    if forward.Magnitude > 0 then forward = forward.Unit end
+    if sideways.Magnitude > 0 then sideways = sideways.Unit end
+
+    local direction = Vector3.zero
+    if heldKeys.W then direction += forward end
+    if heldKeys.S then direction -= forward end
+    if heldKeys.D then direction += sideways end
+    if heldKeys.A then direction -= sideways end
+
+    if direction.Magnitude < 0.01 then direction = forward end
+    if direction.Magnitude < 0.01 then
+        direction = Vector3.new(0, 0, -1)
+    end
+
+    return direction.Unit
+end
+
+local function jetpackDash()
+    if dashActive or not root or not humanoid then return end
+    dashActive = true
+
+    playSound(IDS.Jetpack, root)
+    stopMovementTracks()
+    playTrack("Dash", true)
+
+    local particles = createDashParticles()
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = root
+
+    local velocity = Instance.new("LinearVelocity")
+    velocity.Attachment0 = attachment
+    velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+    velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+    velocity.ForceLimitsEnabled = true
+    velocity.ForceLimitMode = Enum.ForceLimitMode.PerAxis
+    velocity.MaxAxesForce = Vector3.new(1000000, 0, 1000000)
+    velocity.Parent = root
+
+    local start = os.clock()
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = {character}
+
+    dashConnection = RunService.Heartbeat:Connect(function()
+        if not dashActive or not root or not root.Parent then return end
+
+        local direction = dashDirection()
+        local hit = workspace:Raycast(root.Position, direction * 2.5, rayParams)
+
+        if hit and hit.Instance.CanCollide then
+            velocity.VectorVelocity = Vector3.zero
+            return
+        end
+
+        velocity.VectorVelocity = Vector3.new(
+            direction.X * DASH_SPEED, 0, direction.Z * DASH_SPEED
+        )
+    end)
+
+    while os.clock() - start < DASH_TIME and root and root.Parent do
+        task.wait(0.03)
+    end
+
+    if dashConnection then
+        dashConnection:Disconnect()
+        dashConnection = nil
+    end
+
+    velocity:Destroy()
+    attachment:Destroy()
+    particles:Destroy()
+    stopTrack("Dash")
+    dashActive = false
+end
+
+-- CRACKED EMPIRE MUSIC ONLY
+local function stopMusic()
+    if music then
+        music:Stop()
+        music:Destroy()
+        music = nil
+        musicName = nil
+    end
+end
+
+local function toggleMusic(name, id)
+    if music then
+        local sameTrack = musicName == name
+        stopMusic()
+        if sameTrack then return end
+    end
+
+    local sound = Instance.new("Sound")
+    sound.Name = "EggmanMusic"
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = 0.8
+    sound.Looped = true
+    sound.Parent = playerGui
+
+    music = sound
+    musicName = name
+
+    local ok, err = pcall(function()
+        ContentProvider:PreloadAsync({sound})
+    end)
+
+    if not ok then
+        warn("Audio preload error:", err)
+    end
+
+    if not sound.IsLoaded then
+        warn("Audio may be private or unavailable:", id)
+    end
+
+    sound:Play()
+    print("Requested music:", name, id)
+end
+
+-- GUI
+local oldGui = playerGui:FindFirstChild("EggmanGUI")
+if oldGui then oldGui:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanGUI"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.fromOffset(230, 290)
+panel.Position = UDim2.new(0, 16, 0.3, 0)
+panel.BackgroundColor3 = Color3.fromRGB(20, 25, 38)
+panel.BorderSizePixel = 0
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
+
+local heading = Instance.new("TextLabel")
+heading.Size = UDim2.new(1, 0, 0, 36)
+heading.BackgroundTransparency = 1
+heading.Text = "EGGMAN R6"
+heading.Font = Enum.Font.GothamBold
+heading.TextSize = 20
+heading.TextColor3 = Color3.fromRGB(80, 190, 255)
+heading.Parent = panel
+
+local function button(label, y, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -16, 0, 36)
+    b.Position = UDim2.fromOffset(8, y)
+    b.BackgroundColor3 = Color3.fromRGB(42, 57, 78)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextSize = 14
+    b.Font = Enum.Font.GothamBold
+    b.Text = label
+    b.BorderSizePixel = 0
+    b.Parent = panel
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+    b.Activated:Connect(callback)
+    return b
+end
+
+local runButton = button("RUN: OFF", 40, function()
+    setRunning(not running)
+    runButton.Text = running and "RUN: ON" or "RUN: OFF"
+end)
+
+button("SHIELD", 80, activateShield)
+button("SHIELD STRIKE", 120, shieldStrike)
+button("JETPACK DASH", 160, jetpackDash)
+button("CRACKED EMPIRE", 200, function()
+    toggleMusic("CrackedEmpire", IDS.CrackedEmpire)
+end)
+button("STOP MUSIC", 240, stopMusic)
+
+-- INPUT
+UIS.InputBegan:Connect(function(input, processed)
+    local key = input.KeyCode
+
+    if key == Enum.KeyCode.W then heldKeys.W = true end
+    if key == Enum.KeyCode.A then heldKeys.A = true end
+    if key == Enum.KeyCode.S then heldKeys.S = true end
+    if key == Enum.KeyCode.D then heldKeys.D = true end
+
+    if processed then return end
+
+    if key == Enum.KeyCode.LeftShift or key == Enum.KeyCode.RightShift then
+        setRunning(true)
+        runButton.Text = "RUN: ON"
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    local key = input.KeyCode
+
+    if key == Enum.KeyCode.W then heldKeys.W = false end
+    if key == Enum.KeyCode.A then heldKeys.A = false end
+    if key == Enum.KeyCode.S then heldKeys.S = false end
+    if key == Enum.KeyCode.D then heldKeys.D = false end
+
+    if key == Enum.KeyCode.LeftShift or key == Enum.KeyCode.RightShift then
+        setRunning(false)
+        runButton.Text = "RUN: OFF"
+    end
+end)
+
+-- DOUBLE JUMP
+UIS.JumpRequest:Connect(function()
+    if not humanoid or not root or dashActive or humanoid.Health <= 0 then
+        return
+    end
+
+    if humanoid.FloorMaterial ~= Enum.Material.Air then
+        jumpCount = 1
+        canDoubleJump = true
+        return
+    end
+
+    if jumpCount == 0 then jumpCount = 1 end
+
+    if jumpCount == 1 and canDoubleJump then
+        jumpCount = 2
+        canDoubleJump = false
+
+        playSound(IDS.DoubleJump, root)
+        doubleJumpSmoke()
+
+        stopTrack("Fall")
+        playTrack("Jump", false)
+
+        local jumpVelocity = humanoid.UseJumpPower
+            and humanoid.JumpPower
+            or math.sqrt(2 * workspace.Gravity * humanoid.JumpHeight)
+
+        local v = root.AssemblyLinearVelocity
+        root.AssemblyLinearVelocity = Vector3.new(v.X, jumpVelocity, v.Z)
+        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- CHARACTER SETUP
+local function setupCharacter(char)
+    for _, connection in ipairs(characterConnections) do
+        connection:Disconnect()
+    end
+    table.clear(characterConnections)
+
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    root = char:WaitForChild("HumanoidRootPart")
+
+    animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
+    end
+
+    if humanoid.RigType ~= Enum.HumanoidRigType.R6 then
+        warn("Set Game Settings > Avatar > Avatar Type to R6.")
+    end
+
+    loadAnimations()
+    jumpCount = 0
+    canDoubleJump = true
+    dashActive = false
+    humanoid.WalkSpeed = running and RUN_SPEED or WALK_SPEED
+    playTrack("Idle", true)
+
+    table.insert(characterConnections, humanoid.StateChanged:Connect(function(_, state)
+        if state == Enum.HumanoidStateType.Landed
+            or state == Enum.HumanoidStateType.Running
+            or state == Enum.HumanoidStateType.RunningNoPhysics then
+            jumpCount = 0
+            canDoubleJump = true
+            stopTrack("Jump")
+            stopTrack("Fall")
+        elseif state == Enum.HumanoidStateType.Jumping then
+            stopMovementTracks()
+            playTrack("Jump", false)
+        elseif state == Enum.HumanoidStateType.Freefall then
+            stopTrack("Jump")
+            playTrack("Fall", true)
+        end
+    end))
+end
+
+RunService.Heartbeat:Connect(function()
+    if not humanoid or not humanoid.Parent or dashActive then return end
+
+    local state = humanoid:GetState()
+    if state == Enum.HumanoidStateType.Freefall
+        or state == Enum.HumanoidStateType.Jumping then
+        return
+    end
+
+    if humanoid.MoveDirection.Magnitude > 0.05 then
+        if running then
+            if tracks.Run and not tracks.Run.IsPlaying then
+                stopMovementTracks()
+                playTrack("Run", true)
+            end
+        elseif tracks.Walk and not tracks.Walk.IsPlaying then
+            stopMovementTracks()
+            playTrack("Walk", true)
+        end
+    elseif tracks.Idle and not tracks.Idle.IsPlaying then
+        stopMovementTracks()
+        playTrack("Idle", true)
+    end
+end)
+
+player.CharacterAdded:Connect(function(char)
+    shieldToken += 1
+    shieldActive = false
+    destroyShield()
+    stopMusic()
+
+    if dashConnection then
+        dashConnection:Disconnect()
+        dashConnection = nil
+    end
+
+    dashActive = false
+    setupCharacter(char)
+end)
+
+setupCharacter(player.Character or player.CharacterAdded:Wait())
+print("Eggman V16 loaded")
