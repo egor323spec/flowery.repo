@@ -1,0 +1,496 @@
+
+-- EGGMan v11 FIX
+-- LocalScript for your own Roblox Studio game
+-- Location: StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- SETTINGS
+local WALK_SPEED = 6
+local RUN_SPEED = 25
+local DASH_SPEED = 75
+local DASH_DURATION = 3
+local SHIELD_DURATION = 5 -- Change if needed
+local SHIELD_DIAMETER = 11
+local RING_INTERVAL = 0.2
+local SHIELD_AFTER_HIT = 0.2
+
+-- SOUND IDS
+local SHIELD_ACTIVATE_SOUND = "121620484878674"
+local SHIELD_RETRACT_SOUND = "101024228616428"
+local SHIELD_HIT_SOUND = "107417919520477"
+local DOUBLE_JUMP_SOUND = "94415781170273"
+local JETPACK_SOUND = "126742809369490"
+
+-- MUSIC IDS
+local MASTERPLAN_ID = "109603358638247"
+local CRACKED_EMPIRE_ID = "87493231115640"
+
+-- ANIMATION IDS
+local ANIMATIONS = {
+    Idle = "126850823844164",
+    Walk = "90633769714545",
+    Run = "139037627723405",
+    Jump = "75242449879123",
+    Fall = "140113712768097",
+    Jetpack = "76911383572824",
+}
+
+local character, humanoid, root, animator
+local tracks = {}
+local shield, shieldLight
+local shieldActive = false
+local shieldGeneration = 0
+local dashActive = false
+local dashGeneration = 0
+local jumpCount = 0
+local musicSound
+
+local function makeSound(id, parent, volume)
+    local s = Instance.new("Sound")
+    s.SoundId = "rbxassetid://" .. id
+    s.Volume = volume or 1
+    s.Parent = parent
+    s:Play()
+    s.Ended:Connect(function()
+        s:Destroy()
+    end)
+    return s
+end
+
+local function loadAnimations()
+    tracks = {}
+    if not animator then return end
+
+    for name, id in pairs(ANIMATIONS) do
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. id
+
+        local ok, track = pcall(function()
+            return animator:LoadAnimation(anim)
+        end)
+
+        if ok and track then
+            tracks[name] = track
+            if name == "Idle" then
+                track.Priority = Enum.AnimationPriority.Idle
+            elseif name == "Walk" or name == "Run" then
+                track.Priority = Enum.AnimationPriority.Movement
+            else
+                track.Priority = Enum.AnimationPriority.Action
+            end
+        end
+    end
+end
+
+local currentAnimation
+
+local function playAnimation(name)
+    local nextTrack = tracks[name]
+    if not nextTrack or currentAnimation == name then return end
+
+    for otherName, track in pairs(tracks) do
+        if otherName ~= name and track.IsPlaying then
+            track:Stop(0.15)
+        end
+    end
+
+    currentAnimation = name
+    if not nextTrack.IsPlaying then
+        nextTrack:Play(0.15)
+    end
+end
+
+local function stopMovementAnimations()
+    for name, track in pairs(tracks) do
+        if track.IsPlaying then
+            track:Stop(0.1)
+        end
+    end
+    currentAnimation = nil
+end
+
+local function createGUI()
+    local old = playerGui:FindFirstChild("EggmanV11GUI")
+    if old then old:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "EggmanV11GUI"
+    gui.ResetOnSpawn = false
+    gui.Parent = playerGui
+
+    local panel = Instance.new("Frame")
+    panel.Name = "Panel"
+    panel.Size = UDim2.fromOffset(210, 300)
+    panel.Position = UDim2.new(0, 15, 0.35, 0)
+    panel.BackgroundColor3 = Color3.fromRGB(25, 35, 55)
+    panel.BackgroundTransparency = 0.12
+    panel.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = panel
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 32)
+    title.BackgroundTransparency = 1
+    title.Text = "EGGMAN v11 FIX"
+    title.TextColor3 = Color3.fromRGB(90, 210, 255)
+    title.TextScaled = true
+    title.Font = Enum.Font.GothamBold
+    title.Parent = panel
+
+    local function button(text, y, callback)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -16, 0, 34)
+        b.Position = UDim2.fromOffset(8, y)
+        b.BackgroundColor3 = Color3.fromRGB(45, 75, 110)
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.Text = text
+        b.TextScaled = true
+        b.Font = Enum.Font.GothamBold
+        b.Parent = panel
+
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 8)
+        c.Parent = b
+
+        b.Activated:Connect(callback)
+        return b
+    end
+
+    button("🛡 SHIELD", 40, function()
+        if shieldActive then
+            -- Pressing Shield again retracts it normally.
+            shieldGeneration += 1
+            shieldActive = false
+            if shield then
+                shield:Destroy()
+                shield = nil
+            end
+            makeSound(SHIELD_RETRACT_SOUND, root, 1)
+            if character then
+                for i = 1, 2 do
+                    for _, part in ipairs(character:GetDescendants()) do
+                        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                            part.Color = Color3.new(1, 1, 1)
+                        end
+                    end
+                    task.wait(0.2)
+                    if not character or not character.Parent then break end
+                    for _, part in ipairs(character:GetDescendants()) do
+                        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                            part.Color = part:GetAttribute("OriginalColor") or Color3.fromRGB(255, 255, 255)
+                        end
+                    end
+                    task.wait(0.2)
+                end
+            end
+            return
+        end
+
+        if not character or not root then return end
+
+        shieldGeneration += 1
+        local generation = shieldGeneration
+        shieldActive = true
+
+        makeSound(SHIELD_ACTIVATE_SOUND, root, 1)
+
+        shield = Instance.new("Part")
+        shield.Name = "EggmanShield"
+        shield.Shape = Enum.PartType.Ball
+        shield.Size = Vector3.new(SHIELD_DIAMETER, SHIELD_DIAMETER, SHIELD_DIAMETER)
+        shield.Material = Enum.Material.ForceField
+        shield.Color = Color3.fromRGB(70, 190, 255)
+        shield.Transparency = 0.45
+        shield.CanCollide = false
+        shield.CanTouch = false
+        shield.CanQuery = false
+        shield.Massless = true
+        shield.CFrame = root.CFrame
+        shield.Parent = character
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = root
+        weld.Part1 = shield
+        weld.Parent = shield
+
+        task.delay(SHIELD_DURATION, function()
+            if generation ~= shieldGeneration or not shieldActive then return end
+
+            shieldActive = false
+            makeSound(SHIELD_RETRACT_SOUND, root, 1)
+
+            if shield then
+                local oldShield = shield
+                shield = nil
+                TweenService:Create(
+                    oldShield,
+                    TweenInfo.new(0.2),
+                    {Size = Vector3.new(0.1, 0.1, 0.1), Transparency = 1}
+                ):Play()
+                task.delay(0.25, function()
+                    if oldShield.Parent then oldShield:Destroy() end
+                end)
+            end
+
+            -- Two white flashes, 0.2 seconds apart.
+            if character then
+                local originals = {}
+                for _, p in ipairs(character:GetDescendants()) do
+                    if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
+                        originals[p] = p.Color
+                    end
+                end
+
+                for i = 1, 2 do
+                    for p in pairs(originals) do
+                        if p.Parent then p.Color = Color3.new(1, 1, 1) end
+                    end
+                    task.wait(0.2)
+                    for p, color in pairs(originals) do
+                        if p.Parent then p.Color = color end
+                    end
+                    if i < 2 then task.wait(0.2) end
+                end
+            end
+        end)
+    end)
+
+    button("🔵 SHIELD STRIKE", 80, function()
+        if not shieldActive or not shield or not root then return end
+
+        local oldShield = shield
+        shieldActive = false
+        shieldGeneration += 1
+        shield = nil
+
+        makeSound(SHIELD_HIT_SOUND, root, 1)
+
+        -- Shield stays for 0.2 seconds after the hit.
+        task.delay(SHIELD_AFTER_HIT, function()
+            if oldShield.Parent then oldShield:Destroy() end
+
+            -- Three thin blue O-shaped rings centered on the torso.
+            -- Each ring surrounds the avatar vertically.
+            for ringIndex = 1, 3 do
+                task.delay((ringIndex - 1) * RING_INTERVAL, function()
+                    if not character or not root or not root.Parent then return end
+
+                    local ringFolder = Instance.new("Folder")
+                    ringFolder.Name = "EggmanShockwave"
+                    ringFolder.Parent = workspace
+
+                    local radius = 5 + ringIndex * 0.2
+                    local segmentCount = 36
+
+                    for j = 1, segmentCount do
+                        local angle = (j / segmentCount) * math.pi * 2
+                        local segment = Instance.new("Part")
+                        segment.Name = "RingSegment"
+                        segment.Anchored = true
+                        segment.CanCollide = false
+                        segment.CanTouch = false
+                        segment.CanQuery = false
+                        segment.Material = Enum.Material.Neon
+                        segment.Color = Color3.fromRGB(0, 190, 255)
+                        segment.Size = Vector3.new(0.22, 0.22, 0.65)
+
+                        -- Vertical ring, centered on the middle of the body.
+                        local center = root.Position
+                        local pos = center + Vector3.new(
+                            math.cos(angle) * radius,
+                            math.sin(angle) * radius,
+                            0
+                        )
+                        segment.CFrame = CFrame.lookAt(
+                            pos,
+                            pos + Vector3.new(-math.sin(angle), math.cos(angle), 0)
+                        )
+                        segment.Parent = ringFolder
+
+                        TweenService:Create(
+                            segment,
+                            TweenInfo.new(0.45),
+                            {
+                                Transparency = 1,
+                                Size = Vector3.new(0.05, 0.05, 0.65)
+                            }
+                        ):Play()
+                    end
+
+                    task.delay(0.5, function()
+                        if ringFolder.Parent then ringFolder:Destroy() end
+                    end)
+                end)
+            end
+        end)
+    end)
+
+    button("🚀 JETPACK DASH", 120, function()
+        if dashActive or not humanoid or not root then return end
+
+        dashActive = true
+        dashGeneration += 1
+        local generation = dashGeneration
+        local startTime = os.clock()
+        local oldSpeed = humanoid.WalkSpeed
+
+        makeSound(JETPACK_SOUND, root, 1)
+        playAnimation("Jetpack")
+
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = root
+
+        local velocity = Instance.new("LinearVelocity")
+        velocity.Attachment0 = attachment
+        velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+        velocity.MaxForce = math.huge
+        velocity.VectorVelocity = root.CFrame.LookVector * DASH_SPEED
+        velocity.Parent = root
+
+        local smoke = Instance.new("ParticleEmitter")
+        smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+        smoke.Rate = 45
+        smoke.Lifetime = NumberRange.new(0.25, 0.5)
+        smoke.Speed = NumberRange.new(2, 5)
+        smoke.SpreadAngle = Vector2.new(35, 35)
+        smoke.Parent = attachment
+
+        local connection
+        connection = RunService.Heartbeat:Connect(function()
+            if generation ~= dashGeneration or not root or not root.Parent then
+                connection:Disconnect()
+                return
+            end
+
+            velocity.VectorVelocity = root.CFrame.LookVector * DASH_SPEED
+
+            if os.clock() - startTime >= DASH_DURATION then
+                connection:Disconnect()
+                if velocity.Parent then velocity:Destroy() end
+                if attachment.Parent then attachment:Destroy() end
+                if humanoid and humanoid.Parent then
+                    humanoid.WalkSpeed = oldSpeed
+                end
+                dashActive = false
+                currentAnimation = nil
+            end
+        end)
+    end)
+
+    button("🎵 MASTERPLAN", 160, function()
+        if musicSound then musicSound:Destroy() end
+        musicSound = Instance.new("Sound")
+        musicSound.SoundId = "rbxassetid://" .. MASTERPLAN_ID
+        musicSound.Volume = 0.7
+        musicSound.Looped = true
+        musicSound.Parent = playerGui
+        musicSound:Play()
+    end)
+
+    button("🎵 CRACKED EMPIRE", 200, function()
+        if musicSound then musicSound:Destroy() end
+        musicSound = Instance.new("Sound")
+        musicSound.SoundId = "rbxassetid://" .. CRACKED_EMPIRE_ID
+        musicSound.Volume = 0.7
+        musicSound.Looped = true
+        musicSound.Parent = playerGui
+        musicSound:Play()
+    end)
+
+    button("⏹ STOP MUSIC", 240, function()
+        if musicSound then
+            musicSound:Stop()
+            musicSound:Destroy()
+            musicSound = nil
+        end
+    end)
+
+    return gui
+end
+
+local function setupCharacter(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    root = char:WaitForChild("HumanoidRootPart")
+    animator = humanoid:FindFirstChildOfClass("Animator")
+
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
+    end
+
+    humanoid.WalkSpeed = WALK_SPEED
+    jumpCount = 0
+    shieldActive = false
+    shieldGeneration += 1
+    dashGeneration += 1
+    dashActive = false
+
+    if shield then shield:Destroy() shield = nil end
+    loadAnimations()
+
+    humanoid.Running:Connect(function(speed)
+        if dashActive then return end
+        if humanoid.FloorMaterial == Enum.Material.Air then return end
+
+        if speed < 0.5 then
+            playAnimation("Idle")
+        elseif speed > 12 then
+            playAnimation("Run")
+        else
+            playAnimation("Walk")
+        end
+    end)
+
+    humanoid.StateChanged:Connect(function(_, state)
+        if state == Enum.HumanoidStateType.Jumping then
+            playAnimation("Jump")
+        elseif state == Enum.HumanoidStateType.Freefall then
+            playAnimation("Fall")
+        elseif state == Enum.HumanoidStateType.Landed then
+            currentAnimation = nil
+        end
+    end)
+
+    playAnimation("Idle")
+end
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed or not humanoid then return end
+
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        if not dashActive then humanoid.WalkSpeed = RUN_SPEED end
+
+    elseif input.KeyCode == Enum.KeyCode.Space then
+        if humanoid.FloorMaterial ~= Enum.Material.Air then
+            jumpCount = 1
+        elseif jumpCount < 2 then
+            jumpCount += 1
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            makeSound(DOUBLE_JUMP_SOUND, root, 1)
+            playAnimation("Jump")
+        end
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftShift and humanoid and not dashActive then
+        humanoid.WalkSpeed = WALK_SPEED
+    end
+end)
+
+player.CharacterAdded:Connect(setupCharacter)
+if player.Character then
+    setupCharacter(player.Character)
+end
+
+createGUI()
