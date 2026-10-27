@@ -1,0 +1,219 @@
+-- Eggman R6
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local root = character:WaitForChild("HumanoidRootPart")
+
+local WALK_SPEED = 6
+local RUN_SPEED = 25
+local JETPACK_SPEED = 75
+local JETPACK_DURATION = 3
+local SHIELD_SIZE = 12
+local DOUBLE_JUMP_SOUND = "rbxassetid://94415781170273"
+
+local running = false
+local jetpacking = false
+local shieldActive = false
+local jumps = 0
+local maxJumps = 2
+local oldSpeed = WALK_SPEED
+local shield
+
+humanoid.WalkSpeed = WALK_SPEED
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanGUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(210, 250)
+frame.Position = UDim2.new(0, 20, 0.35, 0)
+frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 35)
+title.BackgroundColor3 = Color3.fromRGB(180, 30, 20)
+title.Text = "EGGMAN R6"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextScaled = true
+title.Parent = frame
+
+local function makeButton(text, y, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -20, 0, 38)
+    button.Position = UDim2.fromOffset(10, y)
+    button.BackgroundColor3 = Color3.fromRGB(65, 65, 65)
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextScaled = true
+    button.Text = text
+    button.Parent = frame
+    button.Activated:Connect(callback)
+    return button
+end
+
+-- Бег
+local runButton
+runButton = makeButton("Run: OFF", 45, function()
+    running = not running
+    humanoid.WalkSpeed = running and RUN_SPEED or WALK_SPEED
+    runButton.Text = running and "Run: ON" or "Run: OFF"
+end)
+
+-- Визуальный щит
+local shieldButton
+shieldButton = makeButton("Shield: OFF", 88, function()
+    shieldActive = not shieldActive
+
+    if shieldActive then
+        shield = Instance.new("Part")
+        shield.Name = "EggmanVisualShield"
+        shield.Shape = Enum.PartType.Ball
+        shield.Size = Vector3.new(SHIELD_SIZE, SHIELD_SIZE, SHIELD_SIZE)
+        shield.Material = Enum.Material.ForceField
+        shield.Color = Color3.fromRGB(0, 170, 255)
+        shield.Transparency = 0.45
+        shield.CanCollide = false
+        shield.Anchored = false
+        shield.Massless = true
+        shield.Parent = character
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = root
+        weld.Part1 = shield
+        weld.Parent = shield
+
+        shield.CFrame = root.CFrame
+        shieldButton.Text = "Shield: ON"
+    else
+        if shield then
+            shield:Destroy()
+            shield = nil
+        end
+        shieldButton.Text = "Shield: OFF"
+    end
+end)
+
+-- Джетпак: ускорение на 3 секунды
+local jetpackButton
+jetpackButton = makeButton("Jetpack", 131, function()
+    if jetpacking then return end
+
+    jetpacking = true
+    local previousSpeed = humanoid.WalkSpeed
+    humanoid.WalkSpeed = JETPACK_SPEED
+    jetpackButton.Text = "Boosting!"
+
+    task.wait(JETPACK_DURATION)
+
+    if humanoid.Parent then
+        humanoid.WalkSpeed = running and RUN_SPEED or previousSpeed
+    end
+
+    jetpacking = false
+    jetpackButton.Text = "Jetpack"
+end)
+
+-- Музыка
+local music = Instance.new("Sound")
+music.Name = "EggmanMusic"
+music.Volume = 0.7
+music.Looped = true
+music.Parent = root
+
+local musicButton
+musicButton = makeButton("Music: MasterPlan", 174, function()
+    if music.SoundId == "rbxassetid://109603358638247" and music.IsPlaying then
+        music.SoundId = "rbxassetid://87493231115640"
+        musicButton.Text = "Music: CrackedEmpire"
+    else
+        music.SoundId = "rbxassetid://109603358638247"
+        musicButton.Text = "Music: MasterPlan"
+    end
+
+    music:Play()
+end)
+
+makeButton("Stop Music", 217, function()
+    music:Stop()
+end)
+
+-- Двойной прыжок
+local jumpSound = Instance.new("Sound")
+jumpSound.SoundId = DOUBLE_JUMP_SOUND
+jumpSound.Volume = 1
+jumpSound.Parent = root
+
+local function spawnHeelSmoke(footName)
+    local foot = character:FindFirstChild(footName)
+    if not foot then return end
+
+    local attachment = Instance.new("Attachment")
+    attachment.Position = Vector3.new(0, -foot.Size.Y / 2, 0)
+    attachment.Parent = foot
+
+    local smoke = Instance.new("ParticleEmitter")
+    smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    smoke.Rate = 0
+    smoke.Lifetime = NumberRange.new(0.25, 0.4)
+    smoke.Speed = NumberRange.new(1, 2)
+    smoke.SpreadAngle = Vector2.new(20, 20)
+    smoke.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.5),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    smoke.Parent = attachment
+    smoke:Emit(1)
+
+    task.delay(1, function()
+        attachment:Destroy()
+    end)
+end
+
+UIS.JumpRequest:Connect(function()
+    if humanoid.Health <= 0 then return end
+
+    if jumps < maxJumps then
+        jumps += 1
+
+        if jumps == 2 then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            root.AssemblyLinearVelocity = Vector3.new(
+                root.AssemblyLinearVelocity.X,
+                45,
+                root.AssemblyLinearVelocity.Z
+            )
+
+            jumpSound:Play()
+            spawnHeelSmoke("Left Leg")
+            spawnHeelSmoke("Right Leg")
+        end
+    end
+end)
+
+humanoid.StateChanged:Connect(function(_, newState)
+    if newState == Enum.HumanoidStateType.Landed
+        or newState == Enum.HumanoidStateType.Running then
+        jumps = 0
+    end
+end)
+
+-- Восстановление после возрождения
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    root = character:WaitForChild("HumanoidRootPart")
+    humanoid.WalkSpeed = WALK_SPEED
+    jumps = 0
+    shieldActive = false
+    running = false
+    jetpacking = false
+end)
