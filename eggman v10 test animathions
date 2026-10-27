@@ -1,0 +1,378 @@
+```lua
+-- EGGMan TEST R6
+-- Place LocalScript in StarterPlayer > StarterCharacterScripts
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+local character = script.Parent
+local humanoid = character:WaitForChild("Humanoid")
+local root = character:WaitForChild("HumanoidRootPart")
+
+-- YOUR ANIMATION IDS
+local ANIMATIONS = {
+    Idle = "rbxassetid://126850823844164",
+    Walk = "rbxassetid://90633769714545",
+    Run = "rbxassetid://139037627723405",
+    Jump = "rbxassetid://75242449879123",
+    Fall = "rbxassetid://140113712768097",
+    Jetpack = "rbxassetid://76911383572824",
+}
+
+local WALK_SPEED = 6
+local RUN_SPEED = 25
+local JETPACK_SPEED = 70
+local JETPACK_DURATION = 3
+
+humanoid.WalkSpeed = WALK_SPEED
+
+-- ANIMATIONS
+local animator = humanoid:FindFirstChildOfClass("Animator")
+if not animator then
+    animator = Instance.new("Animator")
+    animator.Parent = humanoid
+end
+
+local tracks = {}
+
+for name, id in pairs(ANIMATIONS) do
+    local animation = Instance.new("Animation")
+    animation.AnimationId = id
+
+    local ok, track = pcall(function()
+        return animator:LoadAnimation(animation)
+    end)
+
+    if ok and track then
+        tracks[name] = track
+        track.Priority =
+            (name == "Idle" or name == "Walk" or name == "Run")
+            and Enum.AnimationPriority.Movement
+            or Enum.AnimationPriority.Action
+        track.Looped = name ~= "Jump"
+    else
+        warn("Animation failed:", name, id)
+    end
+end
+
+local currentTrack
+
+local function playAnimation(name)
+    local track = tracks[name]
+    if not track or currentTrack == track then
+        return
+    end
+
+    if currentTrack then
+        currentTrack:Stop(0.15)
+    end
+
+    currentTrack = track
+    track:Play(0.15)
+end
+
+local running = false
+local jetpacking = false
+local jetpackToken = 0
+
+local function updateMovement()
+    if jetpacking then return end
+
+    local state = humanoid:GetState()
+
+    if state == Enum.HumanoidStateType.Jumping then
+        playAnimation("Jump")
+    elseif state == Enum.HumanoidStateType.Freefall then
+        playAnimation("Fall")
+    elseif humanoid.MoveDirection.Magnitude > 0.05 then
+        playAnimation(running and "Run" or "Walk")
+    else
+        playAnimation("Idle")
+    end
+end
+
+humanoid.Running:Connect(updateMovement)
+humanoid.StateChanged:Connect(updateMovement)
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanTestGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local function makeButton(text, position, size, color)
+    local button = Instance.new("TextButton")
+    button.Size = size
+    button.Position = position
+    button.BackgroundColor3 = color or Color3.fromRGB(35, 40, 55)
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextScaled = true
+    button.Text = text
+    button.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = button
+
+    return button
+end
+
+local runButton = makeButton(
+    "RUN: OFF",
+    UDim2.new(0, 15, 0, 100),
+    UDim2.new(0, 150, 0, 42)
+)
+
+local shieldButton = makeButton(
+    "SHIELD: OFF",
+    UDim2.new(0, 15, 0, 150),
+    UDim2.new(0, 150, 0, 42)
+)
+
+local jetpackButton = makeButton(
+    "JETPACK",
+    UDim2.new(0, 15, 0, 200),
+    UDim2.new(0, 150, 0, 42)
+)
+
+-- RUN
+local function setRunning(value)
+    running = value
+    if not jetpacking then
+        humanoid.WalkSpeed = running and RUN_SPEED or WALK_SPEED
+    end
+
+    runButton.Text = running and "RUN: ON" or "RUN: OFF"
+    updateMovement()
+end
+
+runButton.Activated:Connect(function()
+    setRunning(not running)
+end)
+
+-- 3D SHIELD
+local shield
+local shieldEnabled = false
+local shieldToken = 0
+
+local function setShield(enabled)
+    shieldToken += 1
+    local token = shieldToken
+    shieldEnabled = enabled
+
+    shieldButton.Text = enabled and "SHIELD: ON" or "SHIELD: OFF"
+
+    if enabled then
+        if shield then
+            shield:Destroy()
+            shield = nil
+        end
+
+        local part = Instance.new("Part")
+        part.Name = "EggmanTestShield"
+        part.Shape = Enum.PartType.Ball
+        part.Size = Vector3.new(0.2, 0.2, 0.2)
+        part.Material = Enum.Material.ForceField
+        part.Color = Color3.fromRGB(70, 180, 255)
+        part.Transparency = 0.35
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.Massless = true
+        part.Anchored = false
+        part.CFrame = root.CFrame
+        part.Parent = character
+
+        local weld = Instance.new("Weld")
+        weld.Part0 = root
+        weld.Part1 = part
+        weld.C0 = CFrame.new()
+        weld.C1 = CFrame.new()
+        weld.Parent = part
+
+        shield = part
+
+        for i = 1, 12 do
+            if token ~= shieldToken or not shieldEnabled then
+                return
+            end
+
+            local diameter = 0.2 + (5.5 - 0.2) * i / 12
+            part.Size = Vector3.new(diameter, diameter, diameter)
+            RunService.Heartbeat:Wait()
+        end
+    else
+        local oldShield = shield
+        shield = nil
+
+        if oldShield and oldShield.Parent then
+            local startSize = oldShield.Size
+
+            for i = 1, 12 do
+                if token ~= shieldToken then return end
+                if not oldShield.Parent then return end
+
+                local scale = 1 - i / 12
+                oldShield.Size = startSize * scale
+                RunService.Heartbeat:Wait()
+            end
+
+            if oldShield.Parent then
+                oldShield:Destroy()
+            end
+        end
+    end
+end
+
+shieldButton.Activated:Connect(function()
+    setShield(not shieldEnabled)
+end)
+
+-- JETPACK
+local function useJetpack()
+    if jetpacking then return end
+
+    jetpackToken += 1
+    local token = jetpackToken
+
+    jetpacking = true
+    humanoid.WalkSpeed = JETPACK_SPEED
+    playAnimation("Jetpack")
+
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "JetpackFXAttachment"
+    attachment.Position = Vector3.new(0, -1.5, 0)
+    attachment.Parent = root
+
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Name = "JetpackStars"
+    emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    emitter.Color = ColorSequence.new(Color3.new(1, 1, 1))
+    emitter.Lifetime = NumberRange.new(0.25, 0.5)
+    emitter.Rate = 35
+    emitter.Speed = NumberRange.new(2, 5)
+    emitter.SpreadAngle = Vector2.new(180, 180)
+    emitter.Parent = attachment
+
+    task.delay(JETPACK_DURATION, function()
+        if token ~= jetpackToken then return end
+
+        jetpacking = false
+        humanoid.WalkSpeed = running and RUN_SPEED or WALK_SPEED
+
+        attachment:Destroy()
+        updateMovement()
+    end)
+end
+
+jetpackButton.Activated:Connect(useJetpack)
+
+-- MUSIC
+local musicPanel = Instance.new("Frame")
+musicPanel.Name = "EggmanMusicPanel"
+musicPanel.Size = UDim2.new(0, 190, 0, 100)
+musicPanel.Position = UDim2.new(1, -205, 0, 100)
+musicPanel.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+musicPanel.Active = true
+musicPanel.Draggable = true
+musicPanel.Parent = gui
+
+local panelCorner = Instance.new("UICorner")
+panelCorner.CornerRadius = UDim.new(0, 8)
+panelCorner.Parent = musicPanel
+
+local function musicButton(text, y, color)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -10, 0, 38)
+    button.Position = UDim2.new(0, 5, 0, y)
+    button.Text = text
+    button.TextScaled = true
+    button.BackgroundColor3 = color
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Parent = musicPanel
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
+
+    return button
+end
+
+local masterButton = musicButton(
+    "MASTER PLAN",
+    5,
+    Color3.fromRGB(55, 55, 75)
+)
+
+local crackedButton = musicButton(
+    "CRACKED EMPIRE: OFF",
+    52,
+    Color3.fromRGB(75, 35, 35)
+)
+
+local masterSound = Instance.new("Sound")
+masterSound.Name = "MasterPlan"
+masterSound.SoundId = "rbxassetid://109603358638247"
+masterSound.Volume = 1
+masterSound.Looped = false
+masterSound.Parent = SoundService
+
+local crackedSound = Instance.new("Sound")
+crackedSound.Name = "CrackedEmpire"
+crackedSound.SoundId = "rbxassetid://87493231115640"
+crackedSound.Volume = 1
+crackedSound.Looped = true
+crackedSound.Parent = SoundService
+
+masterButton.Activated:Connect(function()
+    crackedSound:Stop()
+    crackedButton.Text = "CRACKED EMPIRE: OFF"
+
+    masterSound:Stop()
+    masterSound.TimePosition = 0
+    masterSound:Play()
+end)
+
+local crackedEnabled = false
+
+crackedButton.Activated:Connect(function()
+    crackedEnabled = not crackedEnabled
+
+    if crackedEnabled then
+        masterSound:Stop()
+        crackedSound.TimePosition = 0
+        crackedSound:Play()
+        crackedButton.Text = "CRACKED EMPIRE: ON"
+    else
+        crackedSound:Stop()
+        crackedButton.Text = "CRACKED EMPIRE: OFF"
+    end
+end)
+
+-- KEYBOARD
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        setRunning(true)
+    elseif input.KeyCode == Enum.KeyCode.G then
+        setShield(not shieldEnabled)
+    elseif input.KeyCode == Enum.KeyCode.J then
+        useJetpack()
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        setRunning(false)
+    end
+end)
+
+-- INITIAL IDLE
+playAnimation("Idle")
+
+print("Eggman test loaded: Shift=Run, G=Shield, J=Jetpack")
+```
