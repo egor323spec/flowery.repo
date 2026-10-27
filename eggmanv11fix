@@ -1,0 +1,523 @@
+
+-- EGGMAN R6 - LOCAL SCRIPT
+-- Place in StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+
+local CONFIG = {
+    WalkSpeed = 6,
+    RunSpeed = 25,
+    JetSpeed = 75,
+    JetDuration = 3,
+    ShieldDiameter = 11,
+    ShieldDuration = 8,
+    DoubleJumpPower = 48,
+
+    DoubleJumpSound = "rbxassetid://94415781170273",
+
+    Animations = {
+        Idle = "126850823844164",
+        Walk = "90633769714545",
+        Run = "139037627723405",
+        Jump = "75242449879123",
+        Fall = "140113712768097",
+        Jetpack = "76911383572824",
+    },
+
+    Music = {
+        MasterPlan = "rbxassetid://109603358638247",
+        CrackedEmpire = "rbxassetid://87493231115640",
+    }
+}
+
+local character, humanoid, root, animator
+local tracks = {}
+local running = false
+local jetActive = false
+local shieldActive = false
+local shield
+local shieldToken = 0
+local jumpsUsed = 0
+local lastJet = 0
+local musicIndex = 0
+local music
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanGUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local panel = Instance.new("Frame")
+panel.Name = "MainPanel"
+panel.Size = UDim2.fromOffset(250, 330)
+panel.Position = UDim2.new(0, 20, 0.35, 0)
+panel.BackgroundColor3 = Color3.fromRGB(17, 20, 31)
+panel.BorderSizePixel = 0
+panel.Parent = gui
+
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 14)
+
+local outline = Instance.new("UIStroke")
+outline.Color = Color3.fromRGB(0, 190, 255)
+outline.Thickness = 2
+outline.Parent = panel
+
+local header = Instance.new("TextLabel")
+header.Size = UDim2.new(1, 0, 0, 48)
+header.BackgroundColor3 = Color3.fromRGB(145, 30, 35)
+header.Text = "EGGMAN  //  R6"
+header.TextColor3 = Color3.new(1, 1, 1)
+header.Font = Enum.Font.GothamBold
+header.TextSize = 20
+header.Parent = panel
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 12)
+
+local buttonHolder = Instance.new("Frame")
+buttonHolder.BackgroundTransparency = 1
+buttonHolder.Position = UDim2.fromOffset(10, 58)
+buttonHolder.Size = UDim2.new(1, -20, 1, -68)
+buttonHolder.Parent = panel
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 7)
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Parent = buttonHolder
+
+local function makeButton(text, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 0, 40)
+    button.BackgroundColor3 = Color3.fromRGB(37, 46, 63)
+    button.TextColor3 = Color3.fromRGB(240, 247, 255)
+    button.Text = text
+    button.Font = Enum.Font.GothamSemibold
+    button.TextSize = 14
+    button.AutoButtonColor = true
+    button.Parent = buttonHolder
+
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(65, 100, 130)
+    stroke.Thickness = 1
+    stroke.Parent = button
+
+    button.Activated:Connect(callback)
+    return button
+end
+
+local runButton
+local shieldButton
+local jetButton
+local musicButton
+
+-- Sound and animation helpers
+local function loadTrack(name, id)
+    if not animator then return end
+
+    local animation = Instance.new("Animation")
+    animation.AnimationId = "rbxassetid://" .. id
+
+    local success, track = pcall(function()
+        return animator:LoadAnimation(animation)
+    end)
+
+    if success and track then
+        tracks[name] = track
+        if name == "Idle" then
+            track.Priority = Enum.AnimationPriority.Idle
+        else
+            track.Priority = Enum.AnimationPriority.Movement
+        end
+        track.Looped = name ~= "Jump"
+    end
+end
+
+local function playTrack(name)
+    local track = tracks[name]
+    if track and not track.IsPlaying then
+        track:Play(0.12)
+    end
+end
+
+local function stopTrack(name)
+    local track = tracks[name]
+    if track and track.IsPlaying then
+        track:Stop(0.12)
+    end
+end
+
+local function smokeFromFoot(name)
+    local foot = character and character:FindFirstChild(name)
+    if not foot then return end
+
+    local attachment = Instance.new("Attachment")
+    attachment.Position = Vector3.new(0, -foot.Size.Y / 2, 0)
+    attachment.Parent = foot
+
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    emitter.Rate = 0
+    emitter.Lifetime = NumberRange.new(0.3, 0.5)
+    emitter.Speed = NumberRange.new(2, 4)
+    emitter.SpreadAngle = Vector2.new(25, 25)
+    emitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.5),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    emitter.Parent = attachment
+    emitter:Emit(1)
+
+    task.delay(1, function()
+        if attachment.Parent then
+            attachment:Destroy()
+        end
+    end)
+end
+
+local function makeStarBurst()
+    if not root then return end
+
+    for _, footName in ipairs({"Left Leg", "Right Leg"}) do
+        local foot = character:FindFirstChild(footName)
+        if foot then
+            local spark = Instance.new("ParticleEmitter")
+            spark.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+            spark.Rate = 0
+            spark.Lifetime = NumberRange.new(0.2, 0.45)
+            spark.Speed = NumberRange.new(3, 7)
+            spark.SpreadAngle = Vector2.new(45, 45)
+            spark.Parent = foot
+            spark:Emit(8)
+            task.delay(1, function()
+                if spark.Parent then spark:Destroy() end
+            end)
+        end
+    end
+end
+
+local function createRings(position)
+    for i = 1, 3 do
+        local ring = Instance.new("Part")
+        ring.Name = "EggmanShieldRing"
+        ring.Shape = Enum.PartType.Cylinder
+        ring.Material = Enum.Material.Neon
+        ring.Color = Color3.fromRGB(0, 190, 255)
+        ring.Transparency = 0.1
+        ring.Anchored = true
+        ring.CanCollide = false
+        ring.CanTouch = false
+        ring.CanQuery = false
+        ring.Size = Vector3.new(0.12, 1, 1)
+        ring.CFrame = CFrame.new(position + Vector3.new(0, i * 0.12, 0))
+            * CFrame.Angles(0, 0, math.rad(90))
+        ring.Parent = workspace
+
+        local tween = TweenService:Create(
+            ring,
+            TweenInfo.new(0.65, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            {
+                Size = Vector3.new(0.12, 12, 12),
+                Transparency = 1
+            }
+        )
+        tween:Play()
+        tween.Completed:Connect(function()
+            ring:Destroy()
+        end)
+    end
+end
+
+local function flashWhiteTwice()
+    if not character then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.new(1, 1, 1)
+    highlight.OutlineColor = Color3.new(1, 1, 1)
+    highlight.FillTransparency = 0.15
+    highlight.OutlineTransparency = 1
+    highlight.Parent = character
+
+    for _ = 1, 2 do
+        highlight.Enabled = true
+        task.wait(0.12)
+        highlight.Enabled = false
+        task.wait(0.12)
+    end
+
+    highlight:Destroy()
+end
+
+-- Shield visuals
+local function removeShield(exploded)
+    if not shield then return end
+
+    local sphere = shield
+    local position = sphere.Position
+    shield = nil
+    shieldActive = false
+    shieldButton.Text = "ENERGY SHIELD  •  OFF"
+
+    if exploded then
+        -- Sphere remains for half a second after the burst.
+        task.wait(0.5)
+        if sphere.Parent then sphere:Destroy() end
+        createRings(position)
+    else
+        local tween = TweenService:Create(
+            sphere,
+            TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            {
+                Size = Vector3.new(0.1, 0.1, 0.1),
+                Transparency = 1
+            }
+        )
+        tween:Play()
+        tween.Completed:Wait()
+        if sphere.Parent then sphere:Destroy() end
+        flashWhiteTwice()
+    end
+end
+
+local function toggleShield()
+    if not character or not root then return end
+
+    if shieldActive and shield then
+        shieldToken += 1
+        shieldActive = false
+        shieldButton.Text = "ENERGY SHIELD  •  EXPLODING"
+
+        local burst = Instance.new("Explosion")
+        burst.Position = shield.Position
+        burst.BlastRadius = 0
+        burst.BlastPressure = 0
+        burst.DestroyJointRadiusPercent = 0
+        burst.Parent = workspace
+
+        task.spawn(function()
+            removeShield(true)
+        end)
+        return
+    end
+
+    shieldToken += 1
+    local token = shieldToken
+    shieldActive = true
+
+    local sphere = Instance.new("Part")
+    sphere.Name = "EggmanGlassShield"
+    sphere.Shape = Enum.PartType.Ball
+    sphere.Size = Vector3.new(0.1, 0.1, 0.1)
+    sphere.Material = Enum.Material.Glass
+    sphere.Color = Color3.fromRGB(95, 205, 255)
+    sphere.Transparency = 0.35
+    sphere.Anchored = false
+    sphere.Massless = true
+    sphere.CanCollide = false
+    sphere.CanTouch = false
+    sphere.CanQuery = false
+    sphere.CFrame = root.CFrame
+    sphere.Parent = character
+
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = root
+    weld.Part1 = sphere
+    weld.Parent = sphere
+
+    shield = sphere
+    shieldButton.Text = "ENERGY SHIELD  •  ON"
+
+    TweenService:Create(
+        sphere,
+        TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        {
+            Size = Vector3.new(
+                CONFIG.ShieldDiameter,
+                CONFIG.ShieldDiameter,
+                CONFIG.ShieldDiameter
+            )
+        }
+    ):Play()
+
+    task.delay(CONFIG.ShieldDuration, function()
+        if shield == sphere and shieldToken == token and shieldActive then
+            removeShield(false)
+        end
+    end)
+end
+
+-- Buttons
+runButton = makeButton("RUN  •  OFF", function()
+    running = not running
+    if humanoid then
+        humanoid.WalkSpeed = running and CONFIG.RunSpeed or CONFIG.WalkSpeed
+    end
+    runButton.Text = running and "RUN  •  ON" or "RUN  •  OFF"
+end)
+
+shieldButton = makeButton("ENERGY SHIELD  •  OFF", toggleShield)
+
+jetButton = makeButton("JETPACK  •  DASH", function()
+    if not humanoid or not root or jetActive then return end
+    if os.clock() - lastJet < 4 then return end
+
+    jetActive = true
+    lastJet = os.clock()
+
+    humanoid.WalkSpeed = CONFIG.JetSpeed
+    playTrack("Jetpack")
+    makeStarBurst()
+
+    local direction = root.CFrame.LookVector
+    root.AssemblyLinearVelocity = Vector3.new(
+        direction.X * 55,
+        math.max(root.AssemblyLinearVelocity.Y, 12),
+        direction.Z * 55
+    )
+
+    task.delay(CONFIG.JetDuration, function()
+        if humanoid and humanoid.Parent then
+            humanoid.WalkSpeed = running and CONFIG.RunSpeed or CONFIG.WalkSpeed
+        end
+        stopTrack("Jetpack")
+        jetActive = false
+    end)
+end)
+
+musicButton = makeButton("MUSIC  •  MASTERPLAN", function()
+    if not music then return end
+
+    musicIndex = musicIndex % 2 + 1
+    if musicIndex == 1 then
+        music.SoundId = CONFIG.Music.MasterPlan
+        musicButton.Text = "MUSIC  •  MASTERPLAN"
+    else
+        music.SoundId = CONFIG.Music.CrackedEmpire
+        musicButton.Text = "MUSIC  •  CRACKED EMPIRE"
+    end
+    music:Play()
+end)
+
+makeButton("STOP MUSIC", function()
+    if music then music:Stop() end
+end)
+
+-- Character setup
+local function setupCharacter(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    root = character:WaitForChild("HumanoidRootPart")
+
+    animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
+    end
+
+    tracks = {}
+    for name, id in pairs(CONFIG.Animations) do
+        loadTrack(name, id)
+    end
+
+    humanoid.WalkSpeed = CONFIG.WalkSpeed
+
+    music = Instance.new("Sound")
+    music.Name = "EggmanMusic"
+    music.Volume = 0.65
+    music.Looped = true
+    music.Parent = root
+
+    local jumpSound = Instance.new("Sound")
+    jumpSound.Name = "EggmanDoubleJump"
+    jumpSound.SoundId = CONFIG.DoubleJumpSound
+    jumpSound.Volume = 1
+    jumpSound.Parent = root
+
+    jumpsUsed = 0
+    running = false
+    jetActive = false
+    runButton.Text = "RUN  •  OFF"
+
+    humanoid.StateChanged:Connect(function(_, state)
+        if state == Enum.HumanoidStateType.Landed then
+            jumpsUsed = 0
+            stopTrack("Fall")
+        elseif state == Enum.HumanoidStateType.Freefall then
+            playTrack("Fall")
+        end
+    end)
+
+    humanoid.Running:Connect(function(speed)
+        if not humanoid or humanoid.Health <= 0 then return end
+
+        if speed > 0.5 then
+            stopTrack("Idle")
+            if running then
+                stopTrack("Walk")
+                playTrack("Run")
+            else
+                stopTrack("Run")
+                playTrack("Walk")
+            end
+        else
+            stopTrack("Walk")
+            stopTrack("Run")
+            if humanoid.FloorMaterial ~= Enum.Material.Air then
+                playTrack("Idle")
+            end
+        end
+    end)
+
+    humanoid.Jumping:Connect(function(active)
+        if active then playTrack("Jump") end
+    end)
+
+    -- Genuine second jump: first jump is the normal Humanoid jump.
+    local jumpConnection
+    jumpConnection = UIS.JumpRequest:Connect(function()
+        if not humanoid or humanoid.Health <= 0 then return end
+
+        if humanoid.FloorMaterial ~= Enum.Material.Air then
+            jumpsUsed = 1
+            return
+        end
+
+        if jumpsUsed < 1 then
+            jumpsUsed = 1
+        elseif jumpsUsed == 1 then
+            jumpsUsed = 2
+
+            root.AssemblyLinearVelocity = Vector3.new(
+                root.AssemblyLinearVelocity.X,
+                CONFIG.DoubleJumpPower,
+                root.AssemblyLinearVelocity.Z
+            )
+
+            jumpSound:Play()
+            playTrack("Jump")
+            smokeFromFoot("Left Leg")
+            smokeFromFoot("Right Leg")
+        end
+    end)
+
+    humanoid.Died:Connect(function()
+        if jumpConnection then
+            jumpConnection:Disconnect()
+        end
+        if shield then
+            shield:Destroy()
+            shield = nil
+            shieldActive = false
+        end
+        if music then music:Stop() end
+    end)
+end
+
+player.CharacterAdded:Connect(setupCharacter)
+if player.Character then
+    setupCharacter(player.Character)
+end
