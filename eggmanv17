@@ -1,0 +1,587 @@
+
+-- EGGMAN V16 R6 FIX
+-- LocalScript: StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local IDS = {
+    Shield = "121620484878674",
+    Retract = "101024228616428",
+    Strike = "107417919520477",
+    DoubleJump = "94415781170273",
+    Jetpack = "126742809369490",
+    CrackedEmpire = "87493231115640",
+}
+
+local ANIMS = {
+    Idle = "126850823844164",
+    Walk = "90633769714545",
+    Run = "139037627723405",
+    Jump = "75242449879123",
+    Fall = "140113712768097",
+    Dash = "76911383572824",
+}
+
+local WALK_SPEED = 6
+local RUN_SPEED = 25
+local DASH_SPEED = 75
+local DASH_TIME = 3
+local SHIELD_TIME = 5
+
+local character, humanoid, root
+local animator
+local tracks = {}
+local running = false
+local shieldActive = false
+local shieldToken = 0
+local shieldPart
+local music
+local musicOn = false
+local doubleJumpUsed = false
+local dashActive = false
+
+local function setupCharacter(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    root = char:WaitForChild("HumanoidRootPart")
+    animator = humanoid:WaitForChild("Animator")
+
+    tracks = {}
+    for name, id in pairs(ANIMS) do
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. id
+        local ok, track = pcall(function()
+            return animator:LoadAnimation(anim)
+        end)
+        if ok and track then
+            tracks[name] = track
+        end
+    end
+
+    humanoid.WalkSpeed = WALK_SPEED
+    shieldActive = false
+    shieldToken += 1
+    shieldPart = nil
+    doubleJumpUsed = false
+    dashActive = false
+end
+
+if player.Character then
+    setupCharacter(player.Character)
+end
+
+player.CharacterAdded:Connect(setupCharacter)
+
+local function playSound(id, parent, looped, volume)
+    if not parent then return end
+
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = volume or 1
+    sound.Looped = looped or false
+    sound.Parent = parent
+    sound:Play()
+
+    if not looped then
+        Debris:AddItem(sound, 30)
+    end
+
+    return sound
+end
+
+local function stopTrack(name)
+    if tracks[name] and tracks[name].IsPlaying then
+        tracks[name]:Stop(0.1)
+    end
+end
+
+local function playTrack(name)
+    local track = tracks[name]
+    if track and not track.IsPlaying then
+        track:Play(0.15)
+    end
+end
+
+local function stopMovementTracks()
+    for _, name in ipairs({"Idle", "Walk", "Run", "Jump", "Fall", "Dash"}) do
+        stopTrack(name)
+    end
+end
+
+-- UI
+local oldGui = playerGui:FindFirstChild("EggmanV16Gui")
+if oldGui then oldGui:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "EggmanV16Gui"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.fromOffset(230, 310)
+panel.Position = UDim2.new(0, 15, 0.3, 0)
+panel.BackgroundColor3 = Color3.fromRGB(22, 30, 48)
+panel.BackgroundTransparency = 0.08
+panel.Parent = gui
+
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
+
+local function makeButton(text, y, callback)
+    local button = Instance.new("TextButton")
+    button.Name = text:gsub("[^%w]", "") .. "Button"
+    button.Size = UDim2.new(1, -16, 0, 42)
+    button.Position = UDim2.fromOffset(8, y)
+    button.BackgroundColor3 = Color3.fromRGB(35, 100, 180)
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextScaled = true
+    button.Font = Enum.Font.GothamBold
+    button.Text = text
+    button.Parent = panel
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0, 7)
+    button.Activated:Connect(callback)
+    return button
+end
+
+-- White solid-looking ring made from overlapping SmoothPlastic pieces.
+-- The pieces overlap so the rim has no visible gaps.
+local function createWhiteRing(radius, yOffset)
+    if not root then return {} end
+
+    local pieces = {}
+    local count = 64
+    local center = root.Position
+
+    for i = 1, count do
+        local angle = (i / count) * math.pi * 2
+        local part = Instance.new("Part")
+        part.Name = "EggmanWhiteRing"
+        part.Shape = Enum.PartType.Ball
+        part.Material = Enum.Material.SmoothPlastic
+        part.Color = Color3.new(1, 1, 1)
+        part.Size = Vector3.new(0.34, 0.34, 0.34)
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.Position = center + Vector3.new(
+            math.cos(angle) * radius,
+            yOffset,
+            math.sin(angle) * radius
+        )
+        part.Parent = workspace
+        table.insert(pieces, part)
+    end
+
+    return pieces
+end
+
+-- Three white O-shaped rings travel from the feet toward the head.
+local function whiteBodyRings()
+    for ringIndex = 1, 3 do
+        task.delay((ringIndex - 1) * 0.2, function()
+            if not root or not root.Parent then return end
+
+            local ring = createWhiteRing(1.15, -2.7)
+            local start = os.clock()
+            local duration = 0.48
+
+            while os.clock() - start < duration do
+                if not root or not root.Parent then break end
+
+                local alpha = math.clamp(
+                    (os.clock() - start) / duration, 0, 1
+                )
+
+                local center = root.Position
+                local yOffset = -2.7 + alpha * 5.2
+
+                for i, part in ipairs(ring) do
+                    if part.Parent then
+                        local angle = (i / #ring) * math.pi * 2
+                        part.Position = center + Vector3.new(
+                            math.cos(angle) * 1.15,
+                            yOffset,
+                            math.sin(angle) * 1.15
+                        )
+                    end
+                end
+                RunService.Heartbeat:Wait()
+            end
+
+            for _, part in ipairs(ring) do
+                if part.Parent then part:Destroy() end
+            end
+        end)
+    end
+end
+
+-- Two brief white flashes of the character, like Flowery Omega.
+local function eggmanEndFlash()
+    task.wait(0.2)
+    if not character then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "EggmanWhiteFlash"
+    highlight.Adornee = character
+    highlight.FillColor = Color3.new(1, 1, 1)
+    highlight.OutlineColor = Color3.new(1, 1, 1)
+    highlight.FillTransparency = 0
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = character
+
+    for i = 1, 2 do
+        highlight.Enabled = true
+        task.wait(0.1)
+        highlight.Enabled = false
+        if i == 1 then task.wait(0.2) end
+    end
+
+    highlight:Destroy()
+end
+
+-- Blue shockwave
+local function blueExplosion()
+    if not root then return end
+
+    local wave = Instance.new("Part")
+    wave.Name = "EggmanBlueExplosion"
+    wave.Shape = Enum.PartType.Ball
+    wave.Material = Enum.Material.SmoothPlastic
+    wave.Color = Color3.fromRGB(50, 155, 255)
+    wave.Transparency = 0.2
+    wave.Size = Vector3.new(1, 1, 1)
+    wave.CFrame = root.CFrame
+    wave.Anchored = true
+    wave.CanCollide = false
+    wave.CanTouch = false
+    wave.CanQuery = false
+    wave.Parent = workspace
+
+    TweenService:Create(
+        wave,
+        TweenInfo.new(0.35),
+        {
+            Size = Vector3.new(18, 18, 18),
+            Transparency = 1
+        }
+    ):Play()
+
+    Debris:AddItem(wave, 0.4)
+end
+
+local function retractShield()
+    if not shieldPart or not shieldPart.Parent then
+        shieldPart = nil
+        shieldActive = false
+        return
+    end
+
+    local part = shieldPart
+    shieldPart = nil
+    shieldActive = false
+
+    playSound(IDS.Retract, root)
+
+    local tween = TweenService:Create(
+        part,
+        TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+        {
+            Size = Vector3.new(0.1, 0.1, 0.1),
+            Transparency = 1
+        }
+    )
+    tween:Play()
+    tween.Completed:Wait()
+
+    if part.Parent then part:Destroy() end
+
+    -- After the shield is gone, launch the rings and then flash Eggman.
+    whiteBodyRings()
+    task.spawn(eggmanEndFlash)
+end
+
+local function endShield(token)
+    task.wait(SHIELD_TIME)
+    if token ~= shieldToken or not shieldActive then return end
+
+    -- The blue blast happens while the shield remains for 0.2 seconds.
+    blueExplosion()
+    task.wait(0.2)
+
+    if token ~= shieldToken or not shieldActive then return end
+    retractShield()
+end
+
+local function activateShield()
+    if not root or shieldActive then return end
+
+    shieldActive = true
+    shieldToken += 1
+    local token = shieldToken
+
+    playSound(IDS.Shield, root)
+
+    local ball = Instance.new("Part")
+    ball.Name = "EggmanShield"
+    ball.Shape = Enum.PartType.Ball
+    ball.Material = Enum.Material.SmoothPlastic
+    ball.Color = Color3.fromRGB(55, 160, 255)
+    ball.Transparency = 0.4
+    ball.Size = Vector3.new(0.2, 0.2, 0.2)
+    ball.CanCollide = false
+    ball.CanTouch = false
+    ball.CanQuery = false
+    ball.Massless = true
+    ball.CFrame = root.CFrame
+    ball.Parent = workspace
+
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = root
+    weld.Part1 = ball
+    weld.Parent = ball
+
+    shieldPart = ball
+
+    TweenService:Create(
+        ball,
+        TweenInfo.new(0.35),
+        {Size = Vector3.new(11, 11, 11)}
+    ):Play()
+
+    task.spawn(endShield, token)
+end
+
+local function shieldStrike()
+    if not shieldActive then
+        activateShield()
+        return
+    end
+
+    -- Strike triggers the same ending sequence.
+    shieldToken += 1
+    local token = shieldToken
+
+    blueExplosion()
+    task.wait(0.2)
+
+    if token ~= shieldToken or not shieldActive then return end
+    retractShield()
+end
+
+local function dash()
+    if dashActive or not humanoid or not root then return end
+
+    dashActive = true
+    stopMovementTracks()
+    playTrack("Dash")
+    playSound(IDS.Jetpack, root)
+
+    local startTime = os.clock()
+    while os.clock() - startTime < DASH_TIME do
+        if not humanoid or humanoid.Health <= 0 or not root then break end
+
+        local camera = workspace.CurrentCamera
+        if camera then
+            root.AssemblyLinearVelocity =
+                camera.CFrame.LookVector * DASH_SPEED
+        end
+
+        RunService.Heartbeat:Wait()
+    end
+
+    dashActive = false
+    if humanoid then
+        humanoid.WalkSpeed = running and RUN_SPEED or WALK_SPEED
+    end
+end
+
+local function toggleRun()
+    if not humanoid or dashActive then return end
+
+    running = not running
+    humanoid.WalkSpeed = running and RUN_SPEED or WALK_SPEED
+
+    if running then
+        stopTrack("Walk")
+        playTrack("Run")
+    else
+        stopTrack("Run")
+        if humanoid.MoveDirection.Magnitude > 0 then
+            playTrack("Walk")
+        else
+            playTrack("Idle")
+        end
+    end
+end
+
+local function stopMusic()
+    musicOn = false
+    if music then
+        music:Stop()
+        music:Destroy()
+        music = nil
+    end
+end
+
+local function toggleCrackedEmpire(button)
+    if musicOn then
+        stopMusic()
+        button.Text = "CRACKED EMPIRE: OFF"
+        return
+    end
+
+    music = Instance.new("Sound")
+    music.Name = "CrackedEmpireMusic"
+    music.SoundId = "rbxassetid://" .. IDS.CrackedEmpire
+    music.Volume = 0.8
+    music.Looped = true
+    music.Parent = playerGui
+
+    musicOn = true
+    button.Text = "CRACKED EMPIRE: ON"
+    music:Play()
+
+    local current = music
+    task.delay(3, function()
+        if music == current then
+            if not current.IsLoaded then
+                warn("Cracked Empire audio is not loaded. Check Output and audio permissions.")
+            end
+        end
+    end)
+end
+
+makeButton("RUN", 8, toggleRun)
+makeButton("SHIELD", 56, activateShield)
+makeButton("SHIELD STRIKE", 104, shieldStrike)
+makeButton("JETPACK DASH", 152, function()
+    task.spawn(dash)
+end)
+
+local crackedButton = makeButton("CRACKED EMPIRE: OFF", 200, function() end)
+crackedButton.Activated:Connect(function()
+    toggleCrackedEmpire(crackedButton)
+end)
+
+makeButton("STOP MUSIC", 248, function()
+    stopMusic()
+    crackedButton.Text = "CRACKED EMPIRE: OFF"
+end)
+
+-- Keyboard controls
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        if not running then toggleRun() end
+    elseif input.KeyCode == Enum.KeyCode.Q then
+        toggleRun()
+    elseif input.KeyCode == Enum.KeyCode.E then
+        activateShield()
+    elseif input.KeyCode == Enum.KeyCode.R then
+        shieldStrike()
+    elseif input.KeyCode == Enum.KeyCode.F then
+        task.spawn(dash)
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftShift and running then
+        toggleRun()
+    end
+end)
+
+-- Movement animations
+RunService.Heartbeat:Connect(function()
+    if not humanoid or humanoid.Health <= 0 or dashActive then return end
+
+    local state = humanoid:GetState()
+
+    if state == Enum.HumanoidStateType.Jumping
+        or state == Enum.HumanoidStateType.Freefall then
+        stopTrack("Idle")
+        stopTrack("Walk")
+        stopTrack("Run")
+
+        if state == Enum.HumanoidStateType.Jumping then
+            playTrack("Jump")
+        else
+            stopTrack("Jump")
+            playTrack("Fall")
+        end
+    elseif humanoid.MoveDirection.Magnitude > 0.05 then
+        stopTrack("Idle")
+        stopTrack("Jump")
+        stopTrack("Fall")
+
+        if running then
+            stopTrack("Walk")
+            playTrack("Run")
+        else
+            stopTrack("Run")
+            playTrack("Walk")
+        end
+    else
+        stopTrack("Walk")
+        stopTrack("Run")
+        stopTrack("Jump")
+        stopTrack("Fall")
+        playTrack("Idle")
+    end
+end)
+
+-- Double jump
+humanoid = humanoid or (character and character:FindFirstChildOfClass("Humanoid"))
+
+UIS.JumpRequest:Connect(function()
+    if not humanoid or not root then return end
+
+    if humanoid:GetState() == Enum.HumanoidStateType.Freefall
+        and not doubleJumpUsed then
+
+        doubleJumpUsed = true
+        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        root.AssemblyLinearVelocity = Vector3.new(
+            root.AssemblyLinearVelocity.X,
+            55,
+            root.AssemblyLinearVelocity.Z
+        )
+
+        playSound(IDS.DoubleJump, root)
+
+        local smoke = Instance.new("ParticleEmitter")
+        smoke.Name = "EggmanDoubleJumpSmoke"
+        smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+        smoke.Color = ColorSequence.new(Color3.new(1, 1, 1))
+        smoke.Lifetime = NumberRange.new(0.25, 0.5)
+        smoke.Speed = NumberRange.new(3, 7)
+        smoke.Rate = 0
+        smoke.SpreadAngle = Vector2.new(180, 180)
+        smoke.Parent = root
+        smoke:Emit(24)
+        Debris:AddItem(smoke, 1)
+    end
+end)
+
+local function connectLanding()
+    if not humanoid then return end
+
+    humanoid.StateChanged:Connect(function(_, newState)
+        if newState == Enum.HumanoidStateType.Landed
+            or newState == Enum.HumanoidStateType.Running then
+            doubleJumpUsed = false
+        end
+    end)
+end
+
+if humanoid then connectLanding() end
+
+print("EGGMAN V16 R6 FIX loaded")
