@@ -1,0 +1,267 @@
+-- DEATHBRINGER R6 ANIMATION CONTROLLER
+-- For testing in your own Roblox Studio experience
+-- Q = right punch | E = left punch
+-- F = charge for phase 2 | G = enter phase 3
+-- H = Slam (phase 2 only)
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+
+local ANIM = {
+    Idle       = "136366449779363",
+    Walk       = "121126638084274",
+    RightPunch = "125744560944081",
+    LeftPunch  = "113285462910030",
+    Charge     = "110501445579285",
+    Slam       = "84372713847106",
+    SkullBreak = "112808224638663",
+    Spin       = "96180022055679",
+}
+
+local SOUND = {
+    Phase2Scream = "111878327903615",
+    Phase3Start  = "125962334725551",
+    Spin         = "109283575845819",
+}
+
+local SPIN_SPEED = 2.5
+
+local character
+local humanoid
+local animator
+local tracks = {}
+local phase = 1
+local busy = false
+local spinning = false
+local spinSound
+local characterConnections = {}
+
+local function disconnectCharacterConnections()
+    for _, connection in ipairs(characterConnections) do
+        connection:Disconnect()
+    end
+    table.clear(characterConnections)
+end
+
+local function stopTracks(fadeTime)
+    for _, track in pairs(tracks) do
+        if track.IsPlaying then
+            track:Stop(fadeTime or 0.1)
+        end
+    end
+end
+
+local function playSound(id, volume, playbackSpeed)
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = volume or 1
+    sound.PlaybackSpeed = playbackSpeed or 1
+    sound.Looped = false
+    sound.Parent = root
+    sound:Play()
+
+    sound.Ended:Once(function()
+        sound:Destroy()
+    end)
+
+    return sound
+end
+
+local function loadAnimations()
+    tracks = {}
+
+    for name, id in pairs(ANIM) do
+        local animation = Instance.new("Animation")
+        animation.AnimationId = "rbxassetid://" .. id
+
+        local success, track = pcall(function()
+            return animator:LoadAnimation(animation)
+        end)
+
+        if success and track then
+            tracks[name] = track
+
+            if name == "Idle" or name == "Walk" or name == "Spin" then
+                track.Looped = true
+            end
+
+            if name == "Idle" then
+                track.Priority = Enum.AnimationPriority.Idle
+            elseif name == "Walk" then
+                track.Priority = Enum.AnimationPriority.Movement
+            else
+                track.Priority = Enum.AnimationPriority.Action
+            end
+        else
+            warn("Failed to load animation:", name, id)
+        end
+
+        animation:Destroy()
+    end
+end
+
+local function playTrack(name, looped, speed)
+    local track = tracks[name]
+    if not track then
+        warn("Animation unavailable:", name)
+        return nil
+    end
+
+    stopTracks(0.1)
+    track.Looped = looped == true
+    track:Play(0.1)
+
+    if speed then
+        track:AdjustSpeed(speed)
+    end
+
+    return track
+end
+
+local function playIdleOrWalk()
+    if not humanoid or busy or spinning then return end
+
+    if humanoid.MoveDirection.Magnitude > 0.05 then
+        playTrack("Walk", true)
+    else
+        playTrack("Idle", true)
+    end
+end
+
+local function doAction(name)
+    if busy or spinning or not tracks[name] then return end
+
+    busy = true
+    local track = playTrack(name, false)
+
+    if track then
+        track.Ended:Wait()
+    else
+        task.wait(0.5)
+    end
+
+    busy = false
+    playIdleOrWalk()
+end
+
+local function chargePhase2()
+    if phase ~= 1 or busy then return end
+
+    busy = true
+    local track = playTrack("Charge", false)
+
+    task.delay(1, function()
+        if character and character.Parent and phase == 1 then
+            playSound(SOUND.Phase2Scream, 1, 1)
+        end
+    end)
+
+    if track then
+        track.Ended:Wait()
+    else
+        task.wait(1)
+    end
+
+    phase = 2
+    busy = false
+    playIdleOrWalk()
+    print("Deathbringer: Phase 2 — Slam unlocked")
+end
+
+local function startSpin()
+    spinning = true
+
+    local track = playTrack("Spin", true, SPIN_SPEED)
+    if track then
+        track:AdjustSpeed(SPIN_SPEED)
+    end
+
+    -- Spin sound: one play, speed 0.65, volume 1.5
+    spinSound = playSound(SOUND.Spin, 1.5, 0.65)
+end
+
+local function enterPhase3()
+    if phase ~= 2 or busy then return end
+
+    busy = true
+    local track = playTrack("SkullBreak", false)
+
+    if track then
+        track.Ended:Wait()
+    else
+        task.wait(1)
+    end
+
+    phase = 3
+    playSound(SOUND.Phase3Start, 1, 1)
+
+    busy = false
+    startSpin()
+    print("Deathbringer: Phase 3 — automatic spin")
+end
+
+local function slam()
+    if phase ~= 2 or busy or spinning then return end
+    doAction("Slam")
+end
+
+local function setupCharacter(newCharacter)
+    disconnectCharacterConnections()
+
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    animator = humanoid:WaitForChild("Animator")
+
+    phase = 1
+    busy = false
+    spinning = false
+
+    if spinSound then
+        spinSound:Stop()
+        spinSound:Destroy()
+        spinSound = nil
+    end
+
+    loadAnimations()
+    playIdleOrWalk()
+
+    table.insert(characterConnections,
+        humanoid.Running:Connect(function(speed)
+            if busy or spinning then return end
+
+            local name = speed > 0.5 and "Walk" or "Idle"
+            local current = tracks[name]
+
+            if current and not current.IsPlaying then
+                playTrack(name, true)
+            end
+        end)
+    )
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        doAction("RightPunch")
+    elseif input.KeyCode == Enum.KeyCode.E then
+        doAction("LeftPunch")
+    elseif input.KeyCode == Enum.KeyCode.F then
+        chargePhase2()
+    elseif input.KeyCode == Enum.KeyCode.G then
+        enterPhase3()
+    elseif input.KeyCode == Enum.KeyCode.H then
+        slam()
+    end
+end)
+
+player.CharacterAdded:Connect(setupCharacter)
+
+if player.Character then
+    setupCharacter(player.Character)
+end
