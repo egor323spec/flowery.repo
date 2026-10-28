@@ -1,0 +1,313 @@
+
+-- DEATHBRINGER R6 - LOCAL TEST
+-- Для собственного тестового опыта.
+-- Без флинга и урона другим игрокам.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local root = character:WaitForChild("HumanoidRootPart")
+local torso = character:WaitForChild("Torso")
+
+if humanoid.RigType ~= Enum.HumanoidRigType.R6 then
+    warn("Deathbringer: требуется R6")
+    return
+end
+
+local phase = 1
+local busy = false
+local spinning = false
+local alive = true
+
+local sounds = {
+    Spawn = "111878327903615",
+    Hit = "95509392819152",
+    Phase2 = "123699960005240",
+    Phase3 = "125962334725551",
+    Death = "91814044459254",
+    Spin = "109283575845819",
+}
+
+local function playSound(id, speed, volume)
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.PlaybackSpeed = speed or 1
+    sound.Volume = volume or 1
+    sound.RollOffMaxDistance = 100
+    sound.Parent = root
+    sound:Play()
+    sound.Ended:Connect(function()
+        sound:Destroy()
+    end)
+    return sound
+end
+
+local function removeOldAppearance()
+    for _, item in ipairs(character:GetChildren()) do
+        if item:IsA("Accessory")
+        or item:IsA("Shirt")
+        or item:IsA("Pants")
+        or item:IsA("ShirtGraphic") then
+            item:Destroy()
+        end
+    end
+end
+
+local function assetAccessory(id, name)
+    local ok, objects = pcall(function()
+        return game:GetObjects("rbxassetid://" .. id)
+    end)
+
+    if not ok or not objects or not objects[1] then
+        warn("Не удалось загрузить предмет:", id)
+        return
+    end
+
+    local obj = objects[1]
+    local accessory = obj:IsA("Accessory") and obj or
+        obj:FindFirstChildWhichIsA("Accessory", true)
+
+    if accessory then
+        accessory.Name = name or accessory.Name
+        accessory.Parent = character
+        pcall(function()
+            humanoid:AddAccessory(accessory)
+        end)
+    else
+        warn("ID не содержит Accessory:", id)
+    end
+
+    if obj ~= accessory then
+        obj:Destroy()
+    end
+end
+
+local function equipPants()
+    local pants = Instance.new("Pants")
+    pants.Name = "DeathbringerPants"
+    pants.PantsTemplate = "rbxassetid://119742365387093"
+    pants.Parent = character
+end
+
+local function getMotors()
+    return {
+        RightShoulder = torso:WaitForChild("Right Shoulder"),
+        LeftShoulder = torso:WaitForChild("Left Shoulder"),
+        Neck = torso:WaitForChild("Neck"),
+        RootJoint = root:WaitForChild("RootJoint"),
+        RightHip = torso:WaitForChild("Right Hip"),
+        LeftHip = torso:WaitForChild("Left Hip"),
+    }
+end
+
+local motors = getMotors()
+local defaults = {}
+
+for name, motor in pairs(motors) do
+    defaults[name] = motor.C0
+end
+
+local function setJoint(name, angles, duration)
+    local motor = motors[name]
+    if not motor then return end
+
+    local start = motor.C0
+    local target = defaults[name] *
+        CFrame.Angles(
+            math.rad(angles[1]),
+            math.rad(angles[2]),
+            math.rad(angles[3])
+        )
+
+    local elapsed = 0
+    while elapsed < duration and alive do
+        elapsed += RunService.Heartbeat:Wait()
+        motor.C0 = start:Lerp(
+            target,
+            math.clamp(elapsed / duration, 0, 1)
+        )
+    end
+    motor.C0 = target
+end
+
+local function resetPose(duration)
+    local starts = {}
+    for name, motor in pairs(motors) do
+        starts[name] = motor.C0
+    end
+
+    local elapsed = 0
+    while elapsed < duration and alive do
+        elapsed += RunService.Heartbeat:Wait()
+        local alpha = math.clamp(elapsed / duration, 0, 1)
+        for name, motor in pairs(motors) do
+            motor.C0 = starts[name]:Lerp(defaults[name], alpha)
+        end
+    end
+
+    for name, motor in pairs(motors) do
+        motor.C0 = defaults[name]
+    end
+end
+
+local function groundSlam(side, speed)
+    local shoulder = side == "Right" and
+        "RightShoulder" or "LeftShoulder"
+
+    setJoint(shoulder,
+        {-100, 0, side == "Right" and 25 or -25}, speed)
+
+    setJoint("RootJoint", {25, 0, 0}, speed * 0.4)
+    playSound(sounds.Hit, 1, 1)
+
+    setJoint(shoulder,
+        {75, 0, side == "Right" and -15 or 15},
+        speed * 0.4)
+
+    -- Local visual dust burst
+    local dust = Instance.new("Part")
+    dust.Name = "DBGroundEffect"
+    dust.Anchored = true
+    dust.CanCollide = false
+    dust.Shape = Enum.PartType.Ball
+    dust.Material = Enum.Material.Neon
+    dust.Color = Color3.fromRGB(180, 0, 0)
+    dust.Transparency = 0.25
+    dust.Size = Vector3.new(1, 0.15, 1)
+    dust.CFrame = root.CFrame * CFrame.new(0, -2.7, -2)
+    dust.Parent = workspace
+
+    task.spawn(function()
+        for i = 1, 12 do
+            if not dust.Parent then break end
+            dust.Size += Vector3.new(0.8, 0, 0.8)
+            dust.Transparency = math.min(1, dust.Transparency + 0.06)
+            RunService.Heartbeat:Wait()
+        end
+        dust:Destroy()
+    end)
+
+    task.wait(speed * 0.2)
+    resetPose(speed * 0.5)
+end
+
+local function attack()
+    if busy or spinning or not alive then return end
+    busy = true
+
+    local speed = phase == 1 and 0.4 or 0.18
+    groundSlam("Right", speed)
+    task.wait(phase == 1 and 0.12 or 0.03)
+    groundSlam("Left", speed)
+
+    busy = false
+end
+
+local function setPhase(value)
+    phase = math.clamp(value, 1, 3)
+
+    if phase == 2 then
+        playSound(sounds.Phase2)
+    elseif phase == 3 then
+        playSound(sounds.Phase3)
+
+        -- Red glowing head; not the whole body
+        local head = character:FindFirstChild("Head")
+        if head then
+            head.Color = Color3.fromRGB(255, 0, 0)
+            head.Material = Enum.Material.Neon
+        end
+
+        -- Remove head mesh/face visuals locally for the headless effect
+        if head then
+            for _, child in ipairs(head:GetChildren()) do
+                if child:IsA("Decal") then
+                    child.Transparency = 1
+                end
+            end
+        end
+    end
+end
+
+local function spin(duration)
+    if busy or spinning or not alive then return end
+    spinning = true
+
+    -- T-pose
+    motors.RightShoulder.C0 = defaults.RightShoulder *
+        CFrame.Angles(0, 0, math.rad(90))
+    motors.LeftShoulder.C0 = defaults.LeftShoulder *
+        CFrame.Angles(0, 0, math.rad(-90))
+
+    playSound(sounds.Spin, 0.65, 1.5)
+
+    local start = os.clock()
+    while os.clock() - start < duration and alive do
+        local dt = RunService.Heartbeat:Wait()
+        root.CFrame = root.CFrame *
+            CFrame.Angles(0, math.rad(720) * dt, 0)
+    end
+
+    resetPose(0.25)
+    spinning = false
+end
+
+local function activate()
+    removeOldAppearance()
+    equipPants()
+
+    assetAccessory(97560752580299, "DeathbringerHat")
+    assetAccessory(72023933479722, "DeathbringerLeftFist")
+    assetAccessory(71071648894001, "DeathbringerRightFist")
+    assetAccessory(7389900963, "DeathbringerChains")
+
+    playSound(sounds.Spawn)
+end
+
+-- Random spawn scream at varying intervals
+task.spawn(function()
+    while alive and character.Parent do
+        task.wait(math.random(25, 70))
+        if alive and character.Parent then
+            playSound(sounds.Spawn)
+        end
+    end
+end)
+
+-- Keyboard controls:
+-- G = equip cosplay
+-- H = two ground slams
+-- J = phase 1
+-- K = phase 2
+-- L = phase 3
+-- T = spin in T-pose for 3 seconds
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.G then
+        activate()
+    elseif input.KeyCode == Enum.KeyCode.H then
+        attack()
+    elseif input.KeyCode == Enum.KeyCode.J then
+        setPhase(1)
+    elseif input.KeyCode == Enum.KeyCode.K then
+        setPhase(2)
+    elseif input.KeyCode == Enum.KeyCode.L then
+        setPhase(3)
+    elseif input.KeyCode == Enum.KeyCode.T then
+        spin(3)
+    end
+end)
+
+humanoid.Died:Connect(function()
+    alive = false
+    playSound(sounds.Death)
+end)
+
+print("Deathbringer R6 loaded")
+print("G: cosplay | H: attack | J/K/L: phases | T: T-pose spin")
