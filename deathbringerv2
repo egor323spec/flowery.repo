@@ -1,0 +1,213 @@
+
+-- DEATHBRINGER R6 — TEST BUILD
+-- LocalScript -> StarterCharacterScripts
+-- Для собственного Roblox Studio проекта
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local character = script.Parent
+local humanoid = character:WaitForChild("Humanoid")
+local root = character:WaitForChild("HumanoidRootPart")
+
+if humanoid.RigType ~= Enum.HumanoidRigType.R6 then
+    warn("Deathbringer: нужен R6")
+    return
+end
+
+local animator = humanoid:FindFirstChildOfClass("Animator")
+if not animator then
+    animator = Instance.new("Animator")
+    animator.Parent = humanoid
+end
+
+local ID = {
+    Idle = 136366449779363,
+    Walk = 121126638084274,
+    Left = 113285462910030,
+    Right = 121573810079359,
+    Phase2Charge = 110501445579285,
+    Slam = 84372713847106,
+    Spin = 96180022055679,
+    Phase3Transition = 112808224638663,
+    Jump = 0, -- вставь ID прыжка
+    Fall = 0, -- вставь ID падения
+    Run = 0,  -- вставь ID бега
+}
+
+local tracks = {}
+
+local function loadAnim(name, id, priority, looped)
+    if not id or id == 0 then return end
+
+    local anim = Instance.new("Animation")
+    anim.AnimationId = "rbxassetid://" .. id
+
+    local ok, track = pcall(function()
+        return animator:LoadAnimation(anim)
+    end)
+
+    if ok and track then
+        track.Priority = priority
+        track.Looped = looped or false
+        tracks[name] = track
+    end
+end
+
+loadAnim("Idle", ID.Idle, Enum.AnimationPriority.Idle, true)
+loadAnim("Walk", ID.Walk, Enum.AnimationPriority.Movement, true)
+loadAnim("Left", ID.Left, Enum.AnimationPriority.Action, false)
+loadAnim("Right", ID.Right, Enum.AnimationPriority.Action, false)
+loadAnim("Phase2Charge", ID.Phase2Charge,
+    Enum.AnimationPriority.Action4, false)
+loadAnim("Slam", ID.Slam, Enum.AnimationPriority.Action4, false)
+loadAnim("Spin", ID.Spin, Enum.AnimationPriority.Action4, true)
+loadAnim("Phase3Transition", ID.Phase3Transition,
+    Enum.AnimationPriority.Action4, false)
+loadAnim("Jump", ID.Jump, Enum.AnimationPriority.Action, false)
+loadAnim("Fall", ID.Fall, Enum.AnimationPriority.Movement, true)
+loadAnim("Run", ID.Run, Enum.AnimationPriority.Movement, true)
+
+local phase = 1
+local busy = false
+local frozen = false
+local savedSpeed = humanoid.WalkSpeed
+local savedJump = humanoid.JumpPower
+local activeSpin = false
+
+local function stopTracks(except)
+    for name, track in pairs(tracks) do
+        if name ~= except and track.IsPlaying then
+            track:Stop(0.1)
+        end
+    end
+end
+
+local function freeze(on)
+    frozen = on
+    if on then
+        savedSpeed = humanoid.WalkSpeed
+        savedJump = humanoid.JumpPower
+        humanoid.WalkSpeed = 0
+        humanoid.JumpPower = 0
+        humanoid.AutoRotate = false
+    else
+        humanoid.WalkSpeed = savedSpeed
+        humanoid.JumpPower = savedJump
+        humanoid.AutoRotate = true
+    end
+end
+
+local function action(name, shouldFreeze)
+    if busy or not tracks[name] then return end
+
+    busy = true
+    stopTracks(name)
+
+    if shouldFreeze then
+        freeze(true)
+    end
+
+    local track = tracks[name]
+    track:Play(0.08)
+
+    if name == "Spin" then
+        activeSpin = true
+        task.wait(3)
+        activeSpin = false
+        track:Stop(0.1)
+    else
+        track.Stopped:Wait()
+    end
+
+    if shouldFreeze then
+        freeze(false)
+    end
+
+    busy = false
+end
+
+local function phaseTwo()
+    if phase ~= 1 then return end
+    phase = 2
+    action("Phase2Charge", true)
+end
+
+local function phaseThree()
+    if phase ~= 2 then return end
+    phase = 3
+    action("Phase3Transition", true)
+
+    if tracks.Spin then
+        action("Spin", false)
+    end
+end
+
+local function attack(name)
+    action(name, false)
+end
+
+-- Movement animations
+local function updateMovement()
+    if busy or frozen then return end
+
+    local moving = humanoid.MoveDirection.Magnitude > 0.05
+    local state = humanoid:GetState()
+
+    local target
+    if state == Enum.HumanoidStateType.Jumping and tracks.Jump then
+        target = "Jump"
+    elseif state == Enum.HumanoidStateType.Freefall and tracks.Fall then
+        target = "Fall"
+    elseif moving and UIS:IsKeyDown(Enum.KeyCode.LeftShift)
+        and tracks.Run then
+        target = "Run"
+    elseif moving then
+        target = "Walk"
+    else
+        target = "Idle"
+    end
+
+    for name, track in pairs(tracks) do
+        if name ~= target and track.IsPlaying
+            and (name == "Idle" or name == "Walk"
+            or name == "Run" or name == "Jump" or name == "Fall") then
+            track:Stop(0.12)
+        end
+    end
+
+    if tracks[target] and not tracks[target].IsPlaying then
+        tracks[target]:Play(0.12)
+    end
+end
+
+humanoid.Running:Connect(updateMovement)
+humanoid.StateChanged:Connect(updateMovement)
+
+-- Controls
+UIS.InputBegan:Connect(function(input, processed)
+    if processed or busy then return end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        attack("Left")
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        attack("Right")
+    elseif input.KeyCode == Enum.KeyCode.G and phase == 2 then
+        action("Slam", true)
+    elseif input.KeyCode == Enum.KeyCode.H then
+        phaseTwo()
+    elseif input.KeyCode == Enum.KeyCode.J then
+        phaseThree()
+    elseif input.KeyCode == Enum.KeyCode.K and activeSpin then
+        -- Зарезервировано для теста вращения
+    end
+end)
+
+humanoid.Died:Connect(function()
+    for _, track in pairs(tracks) do
+        pcall(function() track:Stop() end)
+    end
+end)
+
+updateMovement()
