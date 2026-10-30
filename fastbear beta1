@@ -1,0 +1,242 @@
+-- FASTBEAR DELTA | LOCAL VISUAL
+-- Walk: 88377575394226
+-- Run: 94684107346506
+-- Swing: 86829213006421
+-- Music: 80102232368924
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+
+local WALK_ID = "rbxassetid://88377575394226"
+local RUN_ID = "rbxassetid://94684107346506"
+local SWING_ID = "rbxassetid://86829213006421"
+local MUSIC_ID = "rbxassetid://80102232368924"
+
+local WALK_SPEED = 32
+local RUN_SPEED = 100
+local MAX_STAMINA = 1893
+
+local stamina = MAX_STAMINA
+local running = false
+local lms = false
+local musicOn = false
+local lastSwing = -100
+local swinging = false
+
+local character, humanoid, animator
+local walkTrack, runTrack, swingTrack
+
+local function loadTrack(id, priority, looped)
+    local anim = Instance.new("Animation")
+    anim.AnimationId = id
+    local track = animator:LoadAnimation(anim)
+    track.Priority = priority
+    track.Looped = looped
+    return track
+end
+
+local function setupCharacter(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    animator = humanoid:WaitForChild("Animator")
+
+    local ok, err = pcall(function()
+        walkTrack = loadTrack(WALK_ID, Enum.AnimationPriority.Movement, true)
+        runTrack = loadTrack(RUN_ID, Enum.AnimationPriority.Movement, true)
+        swingTrack = loadTrack(SWING_ID, Enum.AnimationPriority.Action, false)
+    end)
+
+    if not ok then
+        warn("Fastbear animation error:", err)
+    end
+end
+
+if player.Character then
+    setupCharacter(player.Character)
+end
+
+player.CharacterAdded:Connect(setupCharacter)
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "FastbearDelta"
+gui.ResetOnSpawn = false
+
+pcall(function()
+    gui.Parent = game:GetService("CoreGui")
+end)
+
+if not gui.Parent then
+    gui.Parent = player:WaitForChild("PlayerGui")
+end
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(230, 220)
+frame.Position = UDim2.new(0, 20, 0.45, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundTransparency = 1
+title.Text = "FASTBEAR"
+title.TextColor3 = Color3.fromRGB(255, 190, 60)
+title.TextScaled = true
+title.Parent = frame
+
+local status = Instance.new("TextLabel")
+status.Position = UDim2.fromOffset(8, 32)
+status.Size = UDim2.new(1, -16, 0, 24)
+status.BackgroundTransparency = 1
+status.TextColor3 = Color3.new(1, 1, 1)
+status.TextScaled = true
+status.Parent = frame
+
+local bar = Instance.new("Frame")
+bar.Position = UDim2.fromOffset(10, 62)
+bar.Size = UDim2.new(1, -20, 0, 15)
+bar.BackgroundColor3 = Color3.fromRGB(65, 65, 65)
+bar.Parent = frame
+
+local fill = Instance.new("Frame")
+fill.Size = UDim2.fromScale(1, 1)
+fill.BackgroundColor3 = Color3.fromRGB(40, 210, 100)
+fill.Parent = bar
+
+local function makeButton(name, y, callback)
+    local b = Instance.new("TextButton")
+    b.Position = UDim2.fromOffset(10, y)
+    b.Size = UDim2.new(1, -20, 0, 30)
+    b.BackgroundColor3 = Color3.fromRGB(55, 55, 70)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextScaled = true
+    b.Text = name
+    b.Parent = frame
+    b.MouseButton1Click:Connect(callback)
+    return b
+end
+
+local runButton
+local lmsButton
+local musicButton
+
+local function setRun(value)
+    running = value
+    if runButton then
+        runButton.Text = running and "RUN: ON" or "RUN: OFF"
+    end
+end
+
+local function toggleLMS()
+    lms = not lms
+    lmsButton.Text = lms and "LMS: ON" or "LMS: OFF"
+end
+
+local function toggleMusic()
+    local sound = SoundService:FindFirstChild("FastbearMusic")
+    if not sound then
+        sound = Instance.new("Sound")
+        sound.Name = "FastbearMusic"
+        sound.SoundId = MUSIC_ID
+        sound.Volume = 1
+        sound.Looped = true
+        sound.Parent = SoundService
+    end
+
+    musicOn = not musicOn
+    if musicOn then
+        sound:Play()
+        musicButton.Text = "MUSIC: STOP"
+    else
+        sound:Stop()
+        musicButton.Text = "MUSIC: PLAY"
+    end
+end
+
+local function doSwing()
+    local cooldown = lms and 10 or 24
+    if swinging or os.clock() - lastSwing < cooldown then
+        return
+    end
+
+    if swingTrack then
+        swinging = true
+        lastSwing = os.clock()
+        swingTrack:Play()
+
+        task.delay(1.2, function()
+            swinging = false
+        end)
+    end
+end
+
+runButton = makeButton("RUN: OFF", 88, function()
+    setRun(not running)
+end)
+
+lmsButton = makeButton("LMS: OFF", 124, toggleLMS)
+
+makeButton("SWING (E)", 160, doSwing)
+
+musicButton = makeButton("MUSIC: PLAY", 196, toggleMusic)
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        setRun(true)
+    elseif input.KeyCode == Enum.KeyCode.R then
+        toggleLMS()
+    elseif input.KeyCode == Enum.KeyCode.E then
+        doSwing()
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        setRun(false)
+    end
+end)
+
+RunService.RenderStepped:Connect(function(dt)
+    if not humanoid or humanoid.Health <= 0 then return end
+
+    local moving = humanoid.MoveDirection.Magnitude > 0.05
+    local canRun = running and stamina > 0 and moving
+
+    if canRun then
+        stamina = math.max(0, stamina - (lms and 10 or 200) * dt)
+    else
+        stamina = math.min(MAX_STAMINA, stamina + (lms and 200 or 150) * dt)
+    end
+
+    humanoid.WalkSpeed = canRun and RUN_SPEED or WALK_SPEED
+
+    if not swinging then
+        if canRun then
+            if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
+            if runTrack and not runTrack.IsPlaying then runTrack:Play() end
+        elseif moving then
+            if runTrack and runTrack.IsPlaying then runTrack:Stop() end
+            if walkTrack and not walkTrack.IsPlaying then walkTrack:Play() end
+        else
+            if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
+            if runTrack and runTrack.IsPlaying then runTrack:Stop() end
+        end
+    end
+
+    fill.Size = UDim2.fromScale(stamina / MAX_STAMINA, 1)
+    status.Text = string.format(
+        "%s | STAMINA: %d",
+        lms and "LMS" or "NORMAL",
+        stamina
+    )
+end)
