@@ -1,0 +1,96 @@
+-- FASTBEAR DELTA INPUT TEST
+-- Проверка клавиш и интерфейса
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+local stamina = 1893
+local maxStamina = 1893
+local lms = false
+local running = false
+local lastSwing = 0
+local swinging = false
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "FastbearTest"
+gui.ResetOnSpawn = false
+
+pcall(function()
+    gui.Parent = game:GetService("CoreGui")
+end)
+
+if not gui.Parent then
+    gui.Parent = player:WaitForChild("PlayerGui")
+end
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(260, 105)
+frame.Position = UDim2.new(0.5, -130, 0.8, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.Parent = gui
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, 0, 0.4, 0)
+status.BackgroundTransparency = 1
+status.TextColor3 = Color3.new(1, 1, 1)
+status.TextScaled = true
+status.Parent = frame
+
+local bar = Instance.new("Frame")
+bar.Position = UDim2.new(0, 10, 0.55, 0)
+bar.Size = UDim2.new(1, -20, 0, 18)
+bar.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+bar.Parent = frame
+
+local fill = Instance.new("Frame")
+fill.Size = UDim2.fromScale(1, 1)
+fill.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+fill.Parent = bar
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        running = true
+
+    elseif input.KeyCode == Enum.KeyCode.R then
+        lms = not lms
+
+    elseif input.KeyCode == Enum.KeyCode.E then
+        local cd = lms and 10 or 24
+
+        if not swinging and os.clock() - lastSwing >= cd then
+            swinging = true
+            lastSwing = os.clock()
+
+            task.delay(1, function()
+                swinging = false
+            end)
+        end
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        running = false
+    end
+end)
+
+RunService.RenderStepped:Connect(function(dt)
+    if running and stamina > 0 then
+        stamina = math.max(0, stamina - (lms and 10 or 200) * dt)
+    else
+        stamina = math.min(maxStamina, stamina + (lms and 200 or 150) * dt)
+    end
+
+    fill.Size = UDim2.fromScale(stamina / maxStamina, 1)
+
+    status.Text = string.format(
+        "FASTBEAR | %s | STAMINA: %d",
+        lms and "LMS ON" or "LMS OFF",
+        stamina
+    )
+end)
