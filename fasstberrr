@@ -1,0 +1,194 @@
+
+-- FASTBEAR CLIENT
+-- LocalScript -> StarterCharacterScripts
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local animator = humanoid:WaitForChild("Animator")
+
+-- SETTINGS
+local WALK_SPEED = 32
+local RUN_SPEED = 100
+
+local MAX_STAMINA = 1893
+local NORMAL_DRAIN = 200
+local NORMAL_REGEN = 150
+local LMS_DRAIN = 10
+local LMS_REGEN = 200
+
+local NORMAL_SWING_CD = 24
+local LMS_SWING_CD = 10
+
+-- ASSET IDS
+local WALK_ID = "rbxassetid://88377575394226"
+local RUN_ID = "rbxassetid://94684107346506"
+local SWING_ID = "rbxassetid://86829213006421"
+local MUSIC_ID = "rbxassetid://80102232368924"
+
+-- STATE
+local stamina = MAX_STAMINA
+local lms = false
+local ctrlHeld = false
+local running = false
+local swinging = false
+local lastSwing = -math.huge
+
+-- ANIMATIONS
+local function makeTrack(id, priority, looped)
+    local animation = Instance.new("Animation")
+    animation.AnimationId = id
+
+    local track = animator:LoadAnimation(animation)
+    track.Priority = priority
+    track.Looped = looped
+    return track
+end
+
+local walkTrack = makeTrack(
+    WALK_ID,
+    Enum.AnimationPriority.Movement,
+    true
+)
+
+local runTrack = makeTrack(
+    RUN_ID,
+    Enum.AnimationPriority.Movement,
+    true
+)
+
+local swingTrack = makeTrack(
+    SWING_ID,
+    Enum.AnimationPriority.Action,
+    false
+)
+
+-- LMS MUSIC
+local music = Instance.new("Sound")
+music.Name = "FastbearLMSMusic"
+music.SoundId = MUSIC_ID
+music.Volume = 1
+music.Looped = true
+music.Parent = character
+
+local function stopMovement()
+    walkTrack:Stop(0.15)
+    runTrack:Stop(0.15)
+end
+
+local function updateAnimations()
+    if swinging then return end
+
+    if humanoid.MoveDirection.Magnitude < 0.05 then
+        stopMovement()
+    elseif running then
+        if not runTrack.IsPlaying then
+            walkTrack:Stop(0.15)
+            runTrack:Play(0.15)
+        end
+    else
+        if not walkTrack.IsPlaying then
+            runTrack:Stop(0.15)
+            walkTrack:Play(0.15)
+        end
+    end
+end
+
+-- LMS TOGGLE
+local function toggleLMS()
+    lms = not lms
+
+    if lms then
+        music:Play()
+    else
+        music:Stop()
+    end
+end
+
+-- SWING
+local function swing()
+    if swinging or humanoid.Health <= 0 then
+        return
+    end
+
+    local cooldown = lms and LMS_SWING_CD or NORMAL_SWING_CD
+
+    if os.clock() - lastSwing < cooldown then
+        return
+    end
+
+    lastSwing = os.clock()
+    swinging = true
+    running = false
+
+    humanoid.WalkSpeed = WALK_SPEED
+    stopMovement()
+
+    swingTrack:Play(0.1)
+    swingTrack.Stopped:Wait()
+
+    swinging = false
+    updateAnimations()
+end
+
+-- INPUT
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.LeftControl
+        or input.KeyCode == Enum.KeyCode.RightControl then
+
+        ctrlHeld = true
+
+    elseif input.KeyCode == Enum.KeyCode.E then
+        task.spawn(swing)
+
+    elseif input.KeyCode == Enum.KeyCode.R then
+        toggleLMS()
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftControl
+        or input.KeyCode == Enum.KeyCode.RightControl then
+
+        ctrlHeld = false
+    end
+end)
+
+-- STAMINA AND MOVEMENT
+RunService.Heartbeat:Connect(function(dt)
+    if humanoid.Health <= 0 then return end
+
+    local moving = humanoid.MoveDirection.Magnitude > 0.05
+
+    if ctrlHeld and moving and stamina > 0 and not swinging then
+        running = true
+
+        local drain = lms and LMS_DRAIN or NORMAL_DRAIN
+        stamina = math.max(0, stamina - drain * dt)
+    else
+        running = false
+
+        local regen = lms and LMS_REGEN or NORMAL_REGEN
+        stamina = math.min(MAX_STAMINA, stamina + regen * dt)
+    end
+
+    humanoid.WalkSpeed =
+        (running and not swinging) and RUN_SPEED or WALK_SPEED
+
+    updateAnimations()
+end)
+
+-- CLEANUP
+humanoid.Died:Connect(function()
+    music:Stop()
+    stopMovement()
+    swingTrack:Stop()
+end)
+
+humanoid.WalkSpeed = WALK_SPEED
